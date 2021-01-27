@@ -18,7 +18,7 @@ func TestWasmdExport(t *testing.T) {
 	db := db.NewMemDB()
 	gapp := NewWasmApp(log.NewTMLogger(log.NewSyncWriter(os.Stdout)), db, nil, true, map[int64]bool{}, DefaultNodeHome, 0, wasm.EnableAllProposals, EmptyAppOptions{})
 
-	genesisState := NewDefaultGenesisState()
+	genesisState := NewDefaultGenesisState(gapp.appCodec)
 	stateBytes, err := json.MarshalIndent(genesisState, "", "  ")
 	require.NoError(t, err)
 
@@ -81,23 +81,4 @@ func TestGetEnabledProposals(t *testing.T) {
 			assert.Equal(t, tc.expected, proposals)
 		})
 	}
-}
-
-func setGenesis(gapp *WasmApp) error {
-	genesisState := NewDefaultGenesisState()
-	stateBytes, err := json.MarshalIndent(genesisState, "", " ")
-	if err != nil {
-		return err
-	}
-
-	// Initialize the chain
-	gapp.InitChain(
-		abci.RequestInitChain{
-			Validators:    []abci.ValidatorUpdate{},
-			AppStateBytes: stateBytes,
-		},
-	)
-
-	gapp.Commit()
-	return nil
 }

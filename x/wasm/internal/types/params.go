@@ -82,6 +82,12 @@ func (a AccessConfig) Equals(o AccessConfig) bool {
 	return a.Permission == o.Permission && a.Address == o.Address
 }
 
+// String implements the Stringer interface.
+func (a AccessConfig) String() string {
+	out, _ := yaml.Marshal(a)
+	return string(out)
+}
+
 var (
 	DefaultUploadAccess = AllowEverybody
 	AllowEverybody      = AccessConfig{Permission: AccessTypeEverybody}

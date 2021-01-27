@@ -319,6 +319,15 @@ func TestUpdateParamsProposal(t *testing.T) {
 			expUploadConfig:    types.AllowEverybody,
 			expInstantiateType: types.AccessTypeNobody,
 		},
+		"update instantiate to only address param": {
+			src: proposal.ParamChange{
+				Subspace: types.DefaultParamspace,
+				Key:      string(types.ParamStoreKeyInstantiateAccess),
+				Value:    string(nobodyJson),
+			},
+			expUploadConfig:    types.AllowEverybody,
+			expInstantiateType: types.AccessTypeNobody,
+		},
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {

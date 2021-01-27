@@ -29,7 +29,7 @@ message AccessTypeParam {
 
 // AccessConfig access control type.
 message AccessConfig {
-    option (gogoproto.goproto_stringer) = true;
+    option (gogoproto.goproto_stringer) = false;
     AccessType permission = 1 [(gogoproto.moretags) = "yaml:\"permission\""];
     string address = 2 [(gogoproto.moretags) = "yaml:\"address\""];
 }

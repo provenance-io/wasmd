@@ -609,6 +609,10 @@ func (app *WasmApp) RegisterTendermintService(clientCtx client.Context) {
 	tmservice.RegisterTendermintService(app.BaseApp.GRPCQueryRouter(), clientCtx, app.interfaceRegistry)
 }
 
+func (app *WasmApp) AppCodec() codec.JSONMarshaler {
+	return app.appCodec
+}
+
 // RegisterSwaggerAPI registers swagger route with API Server
 func RegisterSwaggerAPI(_ client.Context, rtr *mux.Router) {
 	statikFS, err := fs.New()

@@ -56,7 +56,7 @@ ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=wasm \
 		  -X github.com/cosmos/cosmos-sdk/version.AppName=wasmd \
 		  -X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
 		  -X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
-		  -X github.com/CosmWasm/wasmd/app.Bech32Prefix=wasm \
+		  -X github.com/CosmWasm/wasmd/app.Bech32Prefix=cosmos \
 		  -X "github.com/cosmos/cosmos-sdk/version.BuildTags=$(build_tags_comma_sep)"
 
 ifeq ($(WITH_CLEVELDB),yes)
@@ -208,4 +208,60 @@ proto-check-breaking:
 
 .PHONY: all build-linux install install-debug \
 	go-mod-cache draw-deps clean build format \
-	test test-all test-build test-cover test-unit test-race
+	test test-all test-build test-cover test-unit test-race \
+	test-sim-custom-genesis-fast
+
+#######################
+SIMAPP = ./app
+BINDIR ?= $(GOPATH)/bin
+RUNSIM         = $(TOOLS_DESTDIR)/runsim
+# Install the runsim binary with a temporary workaround of entering an outside
+# directory as the "go get" command ignores the -mod option and will polute the
+# go.{mod, sum} files.
+#
+# ref: https://github.com/golang/go/issues/30515
+runsim: $(RUNSIM)
+$(RUNSIM):
+	@echo "Installing runsim..."
+	@(cd /tmp && go get github.com/cosmos/tools/cmd/runsim@v1.0.0)
+
+
+
+test-sim-nondeterminism:
+	@echo "Running non-determinism test..."
+	@go test -mod=readonly $(SIMAPP) -run TestAppStateDeterminism -Enabled=true \
+		-NumBlocks=100 -BlockSize=200 -Commit=true -Period=0 -v -timeout 24h
+
+test-sim-custom-genesis-fast:
+	@echo "Running custom genesis simulation..."
+	@echo "By default, ${HOME}/.wasmd/config/genesis.json will be used."
+	@go test -mod=readonly $(SIMAPP) -run TestFullAppSimulation -Genesis=${HOME}/.wasmd/config/genesis.json \
+		-Enabled=true -NumBlocks=100 -BlockSize=200 -Commit=true -Seed=99 -Period=5 -v -timeout 24h
+
+test-sim-import-export: runsim
+	@echo "Running application import/export simulation. This may take several minutes..."
+	@$(BINDIR)/runsim -Jobs=4 -SimAppPkg=$(SIMAPP) -ExitOnFail 50 5 TestAppImportExport
+
+test-sim-after-import: runsim
+	@echo "Running application simulation-after-import. This may take several minutes..."
+	@$(BINDIR)/runsim -Jobs=4 -SimAppPkg=$(SIMAPP) -ExitOnFail 50 5 TestAppSimulationAfterImport
+
+test-sim-custom-genesis-multi-seed: runsim
+	@echo "Running multi-seed custom genesis simulation..."
+	@echo "By default, ${HOME}/.gaiad/config/genesis.json will be used."
+	@$(BINDIR)/runsim -Genesis=${HOME}/.gaiad/config/genesis.json -SimAppPkg=$(SIMAPP) -ExitOnFail 400 5 TestFullAppSimulation
+
+test-sim-multi-seed-long: runsim
+	@echo "Running long multi-seed application simulation. This may take awhile!"
+	@$(BINDIR)/runsim -Jobs=4 -SimAppPkg=$(SIMAPP) -ExitOnFail 500 50 TestFullAppSimulation
+
+test-sim-multi-seed-short: runsim
+	@echo "Running short multi-seed application simulation. This may take awhile!"
+	@$(BINDIR)/runsim -Jobs=4 -SimAppPkg=$(SIMAPP) -ExitOnFail 50 10 TestFullAppSimulation
+
+test-sim-benchmark-invariants:
+	@echo "Running simulation invariant benchmarks..."
+	@go test -mod=readonly $(SIMAPP) -benchmem -bench=BenchmarkInvariants -run=^$ \
+	-Enabled=true -NumBlocks=1000 -BlockSize=200 \
+	-Period=1 -Commit=true -Seed=57 -v -timeout 24h
+
