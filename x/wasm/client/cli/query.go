@@ -77,10 +77,11 @@ func GetCmdListCode() *cobra.Command {
 // GetCmdListContractByCode lists all wasm code uploaded for given code id
 func GetCmdListContractByCode() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list-contract-by-code [code_id]",
-		Short: "List wasm all bytecode on the chain for given code id",
-		Long:  "List wasm all bytecode on the chain for given code id",
-		Args:  cobra.ExactArgs(1),
+		Use:     "list-contract-by-code [code_id]",
+		Short:   "List wasm all bytecode on the chain for given code id",
+		Long:    "List wasm all bytecode on the chain for given code id",
+		Aliases: []string{"list-contracts-by-code"},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientQueryContext(cmd)
 			if err != nil {
