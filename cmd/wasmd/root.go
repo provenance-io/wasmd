@@ -2,11 +2,12 @@ package main
 
 import (
 	"errors"
-	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
-	"github.com/prometheus/client_golang/prometheus"
 	"io"
 	"os"
 	"path/filepath"
+
+	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/CosmWasm/wasmd/x/wasm"
 	clientcodec "github.com/CosmWasm/wasmd/x/wasm/client/codec"
@@ -32,7 +33,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/store"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/version"
-	authclient "github.com/cosmos/cosmos-sdk/x/auth/client"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/cosmos-sdk/x/crisis"
@@ -51,7 +51,7 @@ func NewRootCmd() (*cobra.Command, app.EncodingConfig) {
 	config.Seal()
 
 	initClientCtx := client.Context{}.
-		WithJSONMarshaler(clientcodec.NewProtoCodec(encodingConfig.Marshaler, encodingConfig.InterfaceRegistry)).
+		WithJSONCodec(clientcodec.NewProtoCodec(encodingConfig.Marshaler, encodingConfig.InterfaceRegistry)).
 		WithInterfaceRegistry(encodingConfig.InterfaceRegistry).
 		WithTxConfig(encodingConfig.TxConfig).
 		WithLegacyAmino(encodingConfig.Amino).
@@ -78,8 +78,7 @@ func NewRootCmd() (*cobra.Command, app.EncodingConfig) {
 }
 
 func initRootCmd(rootCmd *cobra.Command, encodingConfig app.EncodingConfig) {
-	authclient.Codec = encodingConfig.Marshaler
-
+	//authclient.Codec = encodingConfig.Marshaler
 	rootCmd.AddCommand(
 		genutilcli.InitCmd(app.ModuleBasics, app.DefaultNodeHome),
 		genutilcli.CollectGenTxsCmd(banktypes.GenesisBalancesIterator{}, app.DefaultNodeHome),

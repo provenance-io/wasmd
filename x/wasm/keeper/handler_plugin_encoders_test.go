@@ -2,15 +2,16 @@ package keeper
 
 import (
 	"encoding/json"
+	"testing"
+
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/wasmtesting"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	ibctransfertypes "github.com/cosmos/cosmos-sdk/x/ibc/applications/transfer/types"
-	clienttypes "github.com/cosmos/cosmos-sdk/x/ibc/core/02-client/types"
-	channeltypes "github.com/cosmos/cosmos-sdk/x/ibc/core/04-channel/types"
+	ibctransfertypes "github.com/cosmos/ibc-go/modules/apps/transfer/types"
+	clienttypes "github.com/cosmos/ibc-go/modules/core/02-client/types"
+	channeltypes "github.com/cosmos/ibc-go/modules/core/04-channel/types"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"testing"
 
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
@@ -28,9 +29,9 @@ func TestEncoding(t *testing.T) {
 		addr3       = RandomAccountAddress(t)
 		invalidAddr = "xrnd1d02kd90n38qvr3qb9qof83fn2d2"
 	)
-	valAddr := make(sdk.ValAddress, sdk.AddrLen)
+	valAddr := make(sdk.ValAddress, 20)
 	valAddr[0] = 12
-	valAddr2 := make(sdk.ValAddress, sdk.AddrLen)
+	valAddr2 := make(sdk.ValAddress, 20)
 	valAddr2[1] = 123
 
 	jsonMsg := json.RawMessage(`{"foo": 123}`)

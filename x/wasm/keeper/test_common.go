@@ -4,6 +4,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"time"
+
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/wasmtesting"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 	"github.com/cosmos/cosmos-sdk/baseapp"
@@ -36,11 +39,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	"github.com/cosmos/cosmos-sdk/x/ibc/applications/transfer"
-	ibctransfertypes "github.com/cosmos/cosmos-sdk/x/ibc/applications/transfer/types"
-	ibc "github.com/cosmos/cosmos-sdk/x/ibc/core"
-	ibchost "github.com/cosmos/cosmos-sdk/x/ibc/core/24-host"
-	ibckeeper "github.com/cosmos/cosmos-sdk/x/ibc/core/keeper"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	"github.com/cosmos/cosmos-sdk/x/params"
@@ -55,6 +53,13 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/cosmos/cosmos-sdk/x/upgrade"
 	upgradeclient "github.com/cosmos/cosmos-sdk/x/upgrade/client"
+	upgradekeeper "github.com/cosmos/cosmos-sdk/x/upgrade/keeper"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
+	"github.com/cosmos/ibc-go/modules/apps/transfer"
+	ibctransfertypes "github.com/cosmos/ibc-go/modules/apps/transfer/types"
+	ibc "github.com/cosmos/ibc-go/modules/core"
+	ibchost "github.com/cosmos/ibc-go/modules/core/24-host"
+	ibckeeper "github.com/cosmos/ibc-go/modules/core/keeper"
 	"github.com/stretchr/testify/require"
 	"github.com/tendermint/tendermint/crypto"
 	"github.com/tendermint/tendermint/crypto/ed25519"
@@ -62,8 +67,6 @@ import (
 	"github.com/tendermint/tendermint/libs/rand"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	dbm "github.com/tendermint/tm-db"
-	"io/ioutil"
-	"time"
 )
 
 type TestingT interface {
@@ -92,7 +95,7 @@ var ModuleBasics = module.NewBasicManager(
 	transfer.AppModuleBasic{},
 )
 
-func MakeTestCodec(t TestingT) codec.Marshaler {
+func MakeTestCodec(t TestingT) codec.Codec {
 	return MakeEncodingConfig(t).Marshaler
 }
 
@@ -124,6 +127,7 @@ var TestingStakeParams = stakingtypes.Params{
 	MaxEntries:        10,
 	HistoricalEntries: 10,
 	BondDenom:         "stake",
+	PowerReduction:    sdk.OneInt(),
 }
 
 type TestKeepers struct {
@@ -138,6 +142,10 @@ type TestKeepers struct {
 	Router         *baseapp.Router
 	EncodingConfig params2.EncodingConfig
 }
+
+type MockVersionSetter struct{}
+
+func (MockVersionSetter) SetProtocolVersion(uint64) {}
 
 // CreateDefaultTestInput common settings for CreateTestInput
 func CreateDefaultTestInput(t TestingT) (sdk.Context, TestKeepers) {
@@ -172,6 +180,7 @@ func createTestInput(
 	keyIBC := sdk.NewKVStoreKey(ibchost.StoreKey)
 	keyCapability := sdk.NewKVStoreKey(capabilitytypes.StoreKey)
 	keyCapabilityTransient := storetypes.NewMemoryStoreKey(capabilitytypes.MemStoreKey)
+	keyUpgrade := sdk.NewKVStoreKey(upgradetypes.StoreKey)
 
 	ms := store.NewCommitMultiStore(db)
 	ms.MountStoreWithDB(keyWasm, sdk.StoreTypeIAVL, db)
@@ -240,9 +249,10 @@ func createTestInput(
 	)
 	bankParams := banktypes.DefaultParams()
 	bankKeeper.SetParams(ctx, bankParams)
-	bankKeeper.SetSupply(ctx, banktypes.NewSupply(sdk.NewCoins(
+	err := bankKeeper.MintCoins(ctx, minttypes.ModuleName, sdk.NewCoins(
 		sdk.NewCoin("denom", sdk.NewInt(10000)),
-	)))
+	))
+	require.NoError(t, err)
 	stakingSubsp, _ := paramsKeeper.GetSubspace(stakingtypes.ModuleName)
 	stakingKeeper := stakingkeeper.NewKeeper(appCodec, keyStaking, authKeeper, bankKeeper, stakingSubsp)
 	stakingKeeper.SetParams(ctx, TestingStakeParams)
@@ -258,9 +268,11 @@ func createTestInput(
 	// set some funds ot pay out validatores, based on code from:
 	// https://github.com/cosmos/cosmos-sdk/blob/fea231556aee4d549d7551a6190389c4328194eb/x/distribution/keeper/keeper_test.go#L50-L57
 	distrAcc := distKeeper.GetDistributionAccount(ctx)
-	err := bankKeeper.SetBalances(ctx, distrAcc.GetAddress(), sdk.NewCoins(
-		sdk.NewCoin("stake", sdk.NewInt(2000000)),
-	))
+
+	stake := sdk.NewCoins(sdk.NewCoin("stake", sdk.NewInt(2000000)))
+	err = bankKeeper.MintCoins(ctx, minttypes.ModuleName, stake)
+	require.NoError(t, err)
+	err = bankKeeper.SendCoinsFromModuleToAccount(ctx, minttypes.ModuleName, distrAcc.GetAddress(), stake)
 	require.NoError(t, err)
 	authKeeper.SetModuleAccount(ctx, distrAcc)
 	capabilityKeeper := capabilitykeeper.NewKeeper(appCodec, keyCapability, keyCapabilityTransient)
@@ -269,17 +281,24 @@ func createTestInput(
 
 	ibcSubsp, _ := paramsKeeper.GetSubspace(ibchost.ModuleName)
 
+	skipHeights := make(map[int64]bool, 0)
+	upgradeKeeper := upgradekeeper.NewKeeper(skipHeights, keyUpgrade, appCodec, tempDir, MockVersionSetter{})
 	ibcKeeper := ibckeeper.NewKeeper(
-		appCodec, keyIBC, ibcSubsp, stakingKeeper, scopedIBCKeeper,
+		appCodec, keyIBC, ibcSubsp, stakingKeeper, upgradeKeeper, scopedIBCKeeper,
 	)
 
 	router := baseapp.NewRouter()
+
+	// TODO: Remove these routes
 	bh := bank.NewHandler(bankKeeper)
 	router.AddRoute(sdk.NewRoute(banktypes.RouterKey, bh))
 	sh := staking.NewHandler(stakingKeeper)
 	router.AddRoute(sdk.NewRoute(stakingtypes.RouterKey, sh))
 	dh := distribution.NewHandler(distKeeper)
 	router.AddRoute(sdk.NewRoute(distributiontypes.RouterKey, dh))
+
+	// TODO: Figure  out how to register new GRPC style services here
+	msgRouter := baseapp.NewMsgServiceRouter()
 
 	querier := baseapp.NewGRPCQueryRouter()
 	banktypes.RegisterQueryServer(querier, bankKeeper)
@@ -299,6 +318,7 @@ func createTestInput(
 		scopedWasmKeeper,
 		wasmtesting.MockIBCTransferKeeper{},
 		router,
+		msgRouter,
 		querier,
 		tempDir,
 		wasmConfig,
@@ -602,7 +622,10 @@ func createFakeFundedAccount(t TestingT, ctx sdk.Context, am authkeeper.AccountK
 func fundAccounts(t TestingT, ctx sdk.Context, am authkeeper.AccountKeeper, bank bankkeeper.Keeper, addr sdk.AccAddress, coins sdk.Coins) {
 	acc := am.NewAccountWithAddress(ctx, addr)
 	am.SetAccount(ctx, acc)
-	require.NoError(t, bank.SetBalances(ctx, addr, coins))
+	err := bank.MintCoins(ctx, minttypes.ModuleName, coins)
+	require.NoError(t, err)
+	err = bank.SendCoinsFromModuleToAccount(ctx, minttypes.ModuleName, addr, coins)
+	require.NoError(t, err)
 }
 
 var keyCounter uint64 = 0

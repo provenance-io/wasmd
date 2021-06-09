@@ -5,10 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/CosmWasm/wasmd/x/wasm"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/CosmWasm/wasmd/x/wasm"
 
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
@@ -28,6 +29,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/errors"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
@@ -127,7 +129,7 @@ func SetupWithGenesisValSet(t *testing.T, valSet *tmtypes.ValidatorSet, genAccs 
 	totalSupply := sdk.NewCoins()
 	for _, b := range balances {
 		// add genesis acc tokens and delegated tokens to total supply
-		totalSupply = totalSupply.Add(b.Coins.Add(sdk.NewCoin(sdk.DefaultBondDenom, bondAmt))...)
+		totalSupply = totalSupply.Add(b.Coins...)
 	}
 
 	// update total supply
@@ -241,9 +243,13 @@ func AddTestAddrsFromPubKeys(app *WasmApp, ctx sdk.Context, pubKeys []cryptotype
 
 // setTotalSupply provides the total supply based on accAmt * totalAccounts.
 func setTotalSupply(app *WasmApp, ctx sdk.Context, accAmt sdk.Int, totalAccounts int) {
-	totalSupply := sdk.NewCoins(sdk.NewCoin(app.stakingKeeper.BondDenom(ctx), accAmt.MulRaw(int64(totalAccounts))))
-	prevSupply := app.bankKeeper.GetSupply(ctx)
-	app.bankKeeper.SetSupply(ctx, banktypes.NewSupply(prevSupply.GetTotal().Add(totalSupply...)))
+	totalSupply := sdk.NewCoin(app.stakingKeeper.BondDenom(ctx), accAmt.MulRaw(int64(totalAccounts)))
+	prevSupply := app.bankKeeper.GetSupply(ctx, app.stakingKeeper.BondDenom(ctx))
+	newTotal := totalSupply.Add(prevSupply)
+	err := app.bankKeeper.MintCoins(ctx, minttypes.ModuleName, sdk.NewCoins(newTotal))
+	if err != nil {
+		panic(err)
+	}
 }
 
 // AddTestAddrs constructs and returns accNum amount of accounts with an
@@ -276,7 +282,11 @@ func addTestAddrs(app *WasmApp, ctx sdk.Context, accNum int, accAmt sdk.Int, str
 func saveAccount(app *WasmApp, ctx sdk.Context, addr sdk.AccAddress, initCoins sdk.Coins) {
 	acc := app.accountKeeper.NewAccountWithAddress(ctx, addr)
 	app.accountKeeper.SetAccount(ctx, acc)
-	err := app.bankKeeper.AddCoins(ctx, addr, initCoins)
+	err := app.bankKeeper.MintCoins(ctx, minttypes.ModuleName, initCoins)
+	if err != nil {
+		panic(err)
+	}
+	err = app.bankKeeper.SendCoinsFromModuleToAccount(ctx, minttypes.ModuleName, addr, initCoins)
 	if err != nil {
 		panic(err)
 	}

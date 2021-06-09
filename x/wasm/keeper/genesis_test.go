@@ -6,6 +6,12 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 	wasmTypes "github.com/CosmWasm/wasmd/x/wasm/types"
 	"github.com/cosmos/cosmos-sdk/store"
@@ -25,11 +31,6 @@ import (
 	"github.com/tendermint/tendermint/proto/tendermint/crypto"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	dbm "github.com/tendermint/tm-db"
-	"io/ioutil"
-	"math/rand"
-	"os"
-	"testing"
-	"time"
 )
 
 const firstCodeID = 1
@@ -561,9 +562,9 @@ func TestSupportedGenMsgTypes(t *testing.T) {
 	wasmCode, err := ioutil.ReadFile("./testdata/hackatom.wasm")
 	require.NoError(t, err)
 	var (
-		myAddress          sdk.AccAddress = bytes.Repeat([]byte{1}, sdk.AddrLen)
-		verifierAddress    sdk.AccAddress = bytes.Repeat([]byte{2}, sdk.AddrLen)
-		beneficiaryAddress sdk.AccAddress = bytes.Repeat([]byte{3}, sdk.AddrLen)
+		myAddress          sdk.AccAddress = bytes.Repeat([]byte{1}, 20)
+		verifierAddress    sdk.AccAddress = bytes.Repeat([]byte{2}, 20)
+		beneficiaryAddress sdk.AccAddress = bytes.Repeat([]byte{3}, 20)
 	)
 	const denom = "stake"
 	importState := types.GenesisState{
@@ -662,7 +663,7 @@ func setupKeeper(t *testing.T) (*Keeper, sdk.Context, []sdk.StoreKey) {
 	wasmConfig := wasmTypes.DefaultWasmConfig()
 	pk := paramskeeper.NewKeeper(encodingConfig.Marshaler, encodingConfig.Amino, keyParams, tkeyParams)
 
-	srcKeeper := NewKeeper(encodingConfig.Marshaler, keyWasm, pk.Subspace(wasmTypes.DefaultParamspace), authkeeper.AccountKeeper{}, nil, stakingkeeper.Keeper{}, distributionkeeper.Keeper{}, nil, nil, nil, nil, nil, nil, tempDir, wasmConfig, SupportedFeatures)
+	srcKeeper := NewKeeper(encodingConfig.Marshaler, keyWasm, pk.Subspace(wasmTypes.DefaultParamspace), authkeeper.AccountKeeper{}, nil, stakingkeeper.Keeper{}, distributionkeeper.Keeper{}, nil, nil, nil, nil, nil, nil, nil, tempDir, wasmConfig, SupportedFeatures)
 	return &srcKeeper, ctx, []sdk.StoreKey{keyWasm, keyParams}
 }
 

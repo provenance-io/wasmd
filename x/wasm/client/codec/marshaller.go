@@ -3,24 +3,25 @@ package codec
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/gogo/protobuf/proto"
 )
 
-var _ codec.Marshaler = (*ProtoCodec)(nil)
+var _ codec.JSONCodec = (*ProtoCodec)(nil)
 
 // ProtoCodec that omits empty values.
 // This Marshaler can be used globally when setting up the client context or individually
 // for each command via `clientCtx.WithJSONMarshaler(myMarshaler)`.
 type ProtoCodec struct {
-	codec.Marshaler
+	codec.JSONCodec
 	interfaceRegistry types.InterfaceRegistry
 }
 
-func NewProtoCodec(marshaler codec.Marshaler, registry types.InterfaceRegistry) *ProtoCodec {
-	return &ProtoCodec{Marshaler: marshaler, interfaceRegistry: registry}
+func NewProtoCodec(marshaler codec.JSONCodec, registry types.InterfaceRegistry) *ProtoCodec {
+	return &ProtoCodec{JSONCodec: marshaler, interfaceRegistry: registry}
 }
 
 // MarshalJSON implements JSONMarshaler.MarshalJSON method,

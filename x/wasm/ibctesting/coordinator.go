@@ -2,16 +2,16 @@ package ibctesting
 
 import (
 	"fmt"
-	"github.com/CosmWasm/wasmd/x/wasm/keeper"
-	ibctesting "github.com/cosmos/cosmos-sdk/x/ibc/testing"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/CosmWasm/wasmd/x/wasm/keeper"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	channeltypes "github.com/cosmos/cosmos-sdk/x/ibc/core/04-channel/types"
-	host "github.com/cosmos/cosmos-sdk/x/ibc/core/24-host"
-	"github.com/cosmos/cosmos-sdk/x/ibc/core/exported"
+	channeltypes "github.com/cosmos/ibc-go/modules/core/04-channel/types"
+	host "github.com/cosmos/ibc-go/modules/core/24-host"
+	"github.com/cosmos/ibc-go/modules/core/exported"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
 )
@@ -55,7 +55,7 @@ func NewCoordinator(t *testing.T, n int, opts ...[]keeper.Option) *Coordinator {
 // for both chains. The channels created are connected to the ibc-transfer application.
 func (coord *Coordinator) Setup(
 	chainA, chainB *TestChain, order channeltypes.Order,
-) (string, string, *ibctesting.TestConnection, *ibctesting.TestConnection, ibctesting.TestChannel, ibctesting.TestChannel) {
+) (string, string, *TestConnection, *TestConnection, TestChannel, TestChannel) {
 	clientA, clientB, connA, connB := coord.SetupClientConnections(chainA, chainB, exported.Tendermint)
 
 	// channels can also be referenced through the returned connections
@@ -86,7 +86,7 @@ func (coord *Coordinator) SetupClients(
 func (coord *Coordinator) SetupClientConnections(
 	chainA, chainB *TestChain,
 	clientType string,
-) (string, string, *ibctesting.TestConnection, *ibctesting.TestConnection) {
+) (string, string, *TestConnection, *TestConnection) {
 
 	clientA, clientB := coord.SetupClients(chainA, chainB, clientType)
 
@@ -153,7 +153,7 @@ func (coord *Coordinator) UpdateClient(
 func (coord *Coordinator) CreateConnection(
 	chainA, chainB *TestChain,
 	clientA, clientB string,
-) (*ibctesting.TestConnection, *ibctesting.TestConnection) {
+) (*TestConnection, *TestConnection) {
 
 	connA, connB, err := coord.ConnOpenInit(chainA, chainB, clientA, clientB)
 	require.NoError(coord.t, err)
@@ -176,9 +176,9 @@ func (coord *Coordinator) CreateConnection(
 // fail.
 func (coord *Coordinator) CreateMockChannels(
 	chainA, chainB *TestChain,
-	connA, connB *ibctesting.TestConnection,
+	connA, connB *TestConnection,
 	order channeltypes.Order,
-) (ibctesting.TestChannel, ibctesting.TestChannel) {
+) (TestChannel, TestChannel) {
 	return coord.CreateChannel(chainA, chainB, connA, connB, MockPort, MockPort, order)
 }
 
@@ -187,9 +187,9 @@ func (coord *Coordinator) CreateMockChannels(
 // successfully opened otherwise testing will fail.
 func (coord *Coordinator) CreateTransferChannels(
 	chainA, chainB *TestChain,
-	connA, connB *ibctesting.TestConnection,
+	connA, connB *TestConnection,
 	order channeltypes.Order,
-) (ibctesting.TestChannel, ibctesting.TestChannel) {
+) (TestChannel, TestChannel) {
 	return coord.CreateChannel(chainA, chainB, connA, connB, TransferPort, TransferPort, order)
 }
 
@@ -198,10 +198,10 @@ func (coord *Coordinator) CreateTransferChannels(
 // opened otherwise testing will fail.
 func (coord *Coordinator) CreateChannel(
 	chainA, chainB *TestChain,
-	connA, connB *ibctesting.TestConnection,
+	connA, connB *TestConnection,
 	sourcePortID, counterpartyPortID string,
 	order channeltypes.Order,
-) (ibctesting.TestChannel, ibctesting.TestChannel) {
+) (TestChannel, TestChannel) {
 
 	channelA, channelB, err := coord.ChanOpenInit(chainA, chainB, connA, connB, sourcePortID, counterpartyPortID, order)
 	require.NoError(coord.t, err)
@@ -252,7 +252,7 @@ func (coord *Coordinator) RecvPacket(
 	coord.IncrementTime()
 	coord.CommitBlock(source, counterparty)
 
-	recvMsg := channeltypes.NewMsgRecvPacket(packet, proof, proofHeight, counterparty.SenderAccount.GetAddress())
+	recvMsg := channeltypes.NewMsgRecvPacket(packet, proof, proofHeight, counterparty.SenderAccount.GetAddress().String())
 
 	// receive on counterparty and update source client
 	return coord.SendMsgs(counterparty, source, sourceClient, []sdk.Msg{recvMsg})
@@ -272,7 +272,8 @@ func (coord *Coordinator) TimeoutPacket(
 	coord.IncrementTime()
 	coord.CommitBlock(source, counterparty)
 
-	timeoutMsg := channeltypes.NewMsgTimeout(packet, packet.Sequence, proofUnreceived, proofHeight, source.SenderAccount.GetAddress())
+	timeoutMsg := channeltypes.NewMsgTimeout(
+		packet, packet.Sequence, proofUnreceived, proofHeight, source.SenderAccount.GetAddress().String())
 	return coord.SendMsgs(source, counterparty, counterpartyClient, []sdk.Msg{timeoutMsg})
 }
 
@@ -313,7 +314,8 @@ func (coord *Coordinator) AcknowledgePacket(
 	coord.IncrementTime()
 	coord.CommitBlock(source, counterparty)
 
-	ackMsg := channeltypes.NewMsgAcknowledgement(packet, ack, proof, proofHeight, source.SenderAccount.GetAddress())
+	ackMsg := channeltypes.NewMsgAcknowledgement(
+		packet, ack, proof, proofHeight, source.SenderAccount.GetAddress().String())
 	return coord.SendMsgs(source, counterparty, counterpartyClient, []sdk.Msg{ackMsg})
 }
 
@@ -463,7 +465,7 @@ func (coord *Coordinator) CommitNBlocks(chain *TestChain, n uint64) {
 func (coord *Coordinator) ConnOpenInit(
 	source, counterparty *TestChain,
 	clientID, counterpartyClientID string,
-) (*ibctesting.TestConnection, *ibctesting.TestConnection, error) {
+) (*TestConnection, *TestConnection, error) {
 	sourceConnection := source.AddTestConnection(clientID, counterpartyClientID)
 	counterpartyConnection := counterparty.AddTestConnection(counterpartyClientID, clientID)
 
@@ -489,7 +491,7 @@ func (coord *Coordinator) ConnOpenInit(
 func (coord *Coordinator) ConnOpenInitOnBothChains(
 	source, counterparty *TestChain,
 	clientID, counterpartyClientID string,
-) (*ibctesting.TestConnection, *ibctesting.TestConnection, error) {
+) (*TestConnection, *TestConnection, error) {
 	sourceConnection := source.AddTestConnection(clientID, counterpartyClientID)
 	counterpartyConnection := counterparty.AddTestConnection(counterpartyClientID, clientID)
 
@@ -528,7 +530,7 @@ func (coord *Coordinator) ConnOpenInitOnBothChains(
 // using the OpenTry handshake call.
 func (coord *Coordinator) ConnOpenTry(
 	source, counterparty *TestChain,
-	sourceConnection, counterpartyConnection *ibctesting.TestConnection,
+	sourceConnection, counterpartyConnection *TestConnection,
 ) error {
 	// initialize TRYOPEN connection on source
 	if err := source.ConnectionOpenTry(counterparty, sourceConnection, counterpartyConnection); err != nil {
@@ -547,7 +549,7 @@ func (coord *Coordinator) ConnOpenTry(
 // using the OpenAck handshake call.
 func (coord *Coordinator) ConnOpenAck(
 	source, counterparty *TestChain,
-	sourceConnection, counterpartyConnection *ibctesting.TestConnection,
+	sourceConnection, counterpartyConnection *TestConnection,
 ) error {
 	// set OPEN connection on source using OpenAck
 	if err := source.ConnectionOpenAck(counterparty, sourceConnection, counterpartyConnection); err != nil {
@@ -566,7 +568,7 @@ func (coord *Coordinator) ConnOpenAck(
 // using the OpenConfirm handshake call.
 func (coord *Coordinator) ConnOpenConfirm(
 	source, counterparty *TestChain,
-	sourceConnection, counterpartyConnection *ibctesting.TestConnection,
+	sourceConnection, counterpartyConnection *TestConnection,
 ) error {
 	if err := source.ConnectionOpenConfirm(counterparty, sourceConnection, counterpartyConnection); err != nil {
 		return err
@@ -587,10 +589,10 @@ func (coord *Coordinator) ConnOpenConfirm(
 // application state.
 func (coord *Coordinator) ChanOpenInit(
 	source, counterparty *TestChain,
-	connection, counterpartyConnection *ibctesting.TestConnection,
+	connection, counterpartyConnection *TestConnection,
 	sourcePortID, counterpartyPortID string,
 	order channeltypes.Order,
-) (ibctesting.TestChannel, ibctesting.TestChannel, error) {
+) (TestChannel, TestChannel, error) {
 	sourceChannel := source.AddTestChannel(connection, sourcePortID)
 	counterpartyChannel := counterparty.AddTestChannel(counterpartyConnection, counterpartyPortID)
 
@@ -620,10 +622,10 @@ func (coord *Coordinator) ChanOpenInit(
 // with the state INIT using the OpenInit handshake call.
 func (coord *Coordinator) ChanOpenInitOnBothChains(
 	source, counterparty *TestChain,
-	connection, counterpartyConnection *ibctesting.TestConnection,
+	connection, counterpartyConnection *TestConnection,
 	sourcePortID, counterpartyPortID string,
 	order channeltypes.Order,
-) (ibctesting.TestChannel, ibctesting.TestChannel, error) {
+) (TestChannel, TestChannel, error) {
 	sourceChannel := source.AddTestChannel(connection, sourcePortID)
 	counterpartyChannel := counterparty.AddTestChannel(counterpartyConnection, counterpartyPortID)
 
@@ -668,8 +670,8 @@ func (coord *Coordinator) ChanOpenInitOnBothChains(
 // using the OpenTry handshake call.
 func (coord *Coordinator) ChanOpenTry(
 	source, counterparty *TestChain,
-	sourceChannel, counterpartyChannel ibctesting.TestChannel,
-	connection *ibctesting.TestConnection,
+	sourceChannel, counterpartyChannel TestChannel,
+	connection *TestConnection,
 	order channeltypes.Order,
 ) error {
 
@@ -690,7 +692,7 @@ func (coord *Coordinator) ChanOpenTry(
 // using the OpenAck handshake call.
 func (coord *Coordinator) ChanOpenAck(
 	source, counterparty *TestChain,
-	sourceChannel, counterpartyChannel ibctesting.TestChannel,
+	sourceChannel, counterpartyChannel TestChannel,
 ) error {
 
 	if err := source.ChanOpenAck(counterparty, sourceChannel, counterpartyChannel); err != nil {
@@ -709,7 +711,7 @@ func (coord *Coordinator) ChanOpenAck(
 // using the OpenConfirm handshake call.
 func (coord *Coordinator) ChanOpenConfirm(
 	source, counterparty *TestChain,
-	sourceChannel, counterpartyChannel ibctesting.TestChannel,
+	sourceChannel, counterpartyChannel TestChannel,
 ) error {
 
 	if err := source.ChanOpenConfirm(counterparty, sourceChannel, counterpartyChannel); err != nil {
@@ -726,7 +728,7 @@ func (coord *Coordinator) ChanOpenConfirm(
 
 func (coord *Coordinator) CloseChannel(
 	source, counterparty *TestChain,
-	channel, counterpartyChannel ibctesting.TestChannel,
+	channel, counterpartyChannel TestChannel,
 ) {
 	err := source.ChanCloseInit(counterparty, channel)
 	require.NoError(coord.t, err)
@@ -744,7 +746,7 @@ func (coord *Coordinator) CloseChannel(
 // NOTE: does not work with ibc-transfer module
 func (coord *Coordinator) ChanCloseInit(
 	source, counterparty *TestChain,
-	channel ibctesting.TestChannel,
+	channel TestChannel,
 ) error {
 
 	if err := source.ChanCloseInit(counterparty, channel); err != nil {
@@ -765,7 +767,7 @@ func (coord *Coordinator) ChanCloseInit(
 // NOTE: does not work with ibc-transfer module
 func (coord *Coordinator) ChanCloseConfirm(
 	source, counterparty *TestChain,
-	channel, counterpartyChannel ibctesting.TestChannel,
+	channel, counterpartyChannel TestChannel,
 ) error {
 	channelKey := host.ChannelKey(channel.PortID, channel.ID)
 	proof, proofHeight := source.QueryProof(channelKey)
@@ -773,7 +775,7 @@ func (coord *Coordinator) ChanCloseConfirm(
 	msg := channeltypes.NewMsgChannelCloseConfirm(
 		counterpartyChannel.PortID, counterpartyChannel.ID,
 		proof, proofHeight,
-		counterparty.SenderAccount.GetAddress(),
+		counterparty.SenderAccount.GetAddress().String(),
 	)
 	return coord.SendMsgs(counterparty, source, counterpartyChannel.CounterpartyClientID, []sdk.Msg{msg})
 }
@@ -781,7 +783,7 @@ func (coord *Coordinator) ChanCloseConfirm(
 // SetChannelClosed sets a channel state to CLOSED.
 func (coord *Coordinator) SetChannelClosed(
 	source, counterparty *TestChain,
-	testChannel ibctesting.TestChannel,
+	testChannel TestChannel,
 ) error {
 	channel := source.GetChannel(testChannel)
 

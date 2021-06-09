@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/CosmWasm/wasmd/x/wasm/keeper"
 
 	"github.com/CosmWasm/wasmd/x/wasm/types"
@@ -341,7 +342,7 @@ func hasAccountBalance(cmd *cobra.Command, appState map[string]json.RawMessage, 
 	if err != nil {
 		return false, err
 	}
-	cdc := clientCtx.JSONMarshaler
+	cdc := clientCtx.JSONCodec
 	var genBalIterator banktypes.GenesisBalancesIterator
 	err = genutil.ValidateAccountInGenesis(appState, genBalIterator, sender, coins, cdc)
 	if err != nil {
@@ -396,7 +397,7 @@ func (d DefaultGenesisReader) ReadWasmGenesis(cmd *cobra.Command) (*GenesisData,
 	var wasmGenesisState types.GenesisState
 	if appState[types.ModuleName] != nil {
 		clientCtx := client.GetClientContextFromCmd(cmd)
-		clientCtx.JSONMarshaler.MustUnmarshalJSON(appState[types.ModuleName], &wasmGenesisState)
+		clientCtx.JSONCodec.MustUnmarshalJSON(appState[types.ModuleName], &wasmGenesisState)
 	}
 
 	return NewGenesisData(
@@ -438,7 +439,7 @@ func (x DefaultGenesisIO) AlterWasmModuleState(cmd *cobra.Command, callback func
 		return err
 	}
 	clientCtx := client.GetClientContextFromCmd(cmd)
-	wasmGenStateBz, err := clientCtx.JSONMarshaler.MarshalJSON(g.WasmModuleState)
+	wasmGenStateBz, err := clientCtx.JSONCodec.MarshalJSON(g.WasmModuleState)
 	if err != nil {
 		return sdkerrors.Wrap(err, "marshal wasm genesis state")
 	}
