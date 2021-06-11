@@ -31,6 +31,9 @@ import (
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+
+	"github.com/CosmWasm/wasmd/x/wasm/ibctesting"
+	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
 // DefaultConsensusParams defines the default Tendermint consensus params used in
@@ -59,6 +62,24 @@ func setup(withGenesis bool, invCheckPeriod uint, opts ...wasm.Option) (*WasmApp
 		return app, NewDefaultGenesisState()
 	}
 	return app, GenesisState{}
+}
+
+func SetupTestingApp(opts ...wasm.Option) func() (ibctesting.TestingApp, map[string]json.RawMessage) {
+	return func() (ibctesting.TestingApp, map[string]json.RawMessage) {
+		app := NewWasmApp(
+			log.NewNopLogger(),
+			dbm.NewMemDB(),
+			nil,
+			true,
+			map[int64]bool{},
+			DefaultNodeHome,
+			5,
+			wasm.EnableAllProposals,
+			EmptyBaseAppOptions{},
+			opts,
+		)
+		return app, NewDefaultGenesisState()
+	}
 }
 
 // Setup initializes a new WasmApp. A Nop logger is set in WasmApp.
@@ -451,4 +472,18 @@ type EmptyBaseAppOptions struct{}
 // Get implements AppOptions
 func (ao EmptyBaseAppOptions) Get(o string) interface{} {
 	return nil
+}
+
+func IBCTestSupport(t *testing.T, chain *ibctesting.TestChain) *TestSupport {
+	app, ok := chain.App.(*WasmApp)
+	if !ok {
+		panic("not a wasmd app")
+	}
+	return NewTestSupport(t, app)
+}
+
+// ContractInfo is a helper function to returns the ContractInfo for the given contract address
+func ContractInfo(t *testing.T, c *ibctesting.TestChain, contractAddr sdk.AccAddress) *types.ContractInfo {
+	ibcs := IBCTestSupport(t, c)
+	return ibcs.WasmKeeper().GetContractInfo(c.GetContext(), contractAddr)
 }

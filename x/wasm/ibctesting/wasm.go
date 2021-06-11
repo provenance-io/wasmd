@@ -8,13 +8,11 @@ import (
 	"io/ioutil"
 	"strings"
 
-	wasmd "github.com/CosmWasm/wasmd/app"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
-	//"github.com/tendermint/tendermint/libs/rand"
 )
 
 var wasmIdent = []byte("\x00\x61\x73\x6D")
@@ -127,14 +125,4 @@ func (c *TestChain) parseSDKResultData(r *sdk.Result) sdk.TxMsgData {
 	var protoResult sdk.TxMsgData
 	require.NoError(c.t, proto.Unmarshal(r.Data, &protoResult))
 	return protoResult
-}
-
-// ContractInfo is a helper function to returns the ContractInfo for the given contract address
-func (c *TestChain) ContractInfo(contractAddr sdk.AccAddress) *types.ContractInfo {
-	return c.TestSupport().WasmKeeper().GetContractInfo(c.GetContext(), contractAddr)
-}
-
-// TestSupport provides access to package private keepers.
-func (c *TestChain) TestSupport() *wasmd.TestSupport {
-	return wasmd.NewTestSupport(c.t, c.App)
 }

@@ -1,8 +1,6 @@
 package wasm
 
 import (
-	"log"
-
 	types "github.com/CosmWasm/wasmd/x/wasm/types"
 	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -207,12 +205,12 @@ func (i IBCHandler) OnRecvPacket(
 ) exported.Acknowledgement {
 	contractAddr, err := ContractFromPortID(packet.DestinationPort)
 	if err != nil {
-		log.Printf("ContractFromPortID failed: %+v", err)
+		ctx.Logger().Error("ContractFromPortID failed", err)
 		return Nack{}
 	}
 	bz, err := i.keeper.OnRecvPacket(ctx, contractAddr, newIBCPacket(packet))
 	if err != nil {
-		log.Printf("OnRecvPacket failed: %+v", err)
+		ctx.Logger().Error("OnRecvPacket failed", err)
 		return Nack{}
 	}
 	return Ack{
