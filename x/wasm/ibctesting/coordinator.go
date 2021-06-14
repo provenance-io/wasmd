@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
+
+	"github.com/CosmWasm/wasmd/x/wasm/keeper"
 )
 
 const ChainIDPrefix = "testchain"
@@ -27,7 +29,7 @@ type Coordinator struct {
 }
 
 // NewCoordinator initializes Coordinator with N TestChain's
-func NewCoordinator(t *testing.T, n int) *Coordinator {
+func NewCoordinator(t *testing.T, n int, opts ...[]keeper.Option) *Coordinator {
 	chains := make(map[string]*TestChain)
 	coord := &Coordinator{
 		t:           t,
@@ -36,7 +38,11 @@ func NewCoordinator(t *testing.T, n int) *Coordinator {
 
 	for i := 0; i < n; i++ {
 		chainID := GetChainID(i)
-		chains[chainID] = NewTestChain(t, coord, chainID)
+		var iopts []keeper.Option
+		if len(opts) != 0 {
+			iopts = opts[i]
+		}
+		chains[chainID] = NewTestChain(t, coord, chainID, iopts...)
 	}
 	coord.Chains = chains
 

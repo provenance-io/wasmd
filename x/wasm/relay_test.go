@@ -35,7 +35,7 @@ package wasm_test
 // 	)
 // 	coordinator.CommitBlock(chainA, chainB)
 // 	myContractAddr := chainB.SeedNewContractInstance()
-// 	contractAPortID := chainB.ContractInfo(myContractAddr).IBCPortID
+// 	contractAPortID := wasmd.ContractInfo(t, chainB, myContractAddr).IBCPortID
 
 // 	myContract.contractAddr = myContractAddr
 // 	myContract.chain = chainB
@@ -44,31 +44,36 @@ package wasm_test
 // 		sourcePortID      = "transfer"
 // 		counterpartPortID = contractAPortID
 // 	)
-// 	clientA, clientB, connA, connB := coordinator.SetupClientConnections(chainA, chainB, ibcexported.Tendermint)
-// 	channelA, channelB := coordinator.CreateChannel(chainA, chainB, connA, connB, sourcePortID, counterpartPortID, channeltypes.UNORDERED)
+// 	//clientA, clientB, connA, connB := coordinator.SetupClientConnections(chainA, chainB, ibcexported.Tendermint)
+// 	//channelA, channelB := coordinator.CreateChannel(chainA, chainB, connA, connB, sourcePortID, counterpartPortID, channeltypes.UNORDERED)
 
-// 	originalBalance := wasmd.NewTestSupport(t, chainA.App).BankKeeper().GetBalance(chainA.GetContext(), chainA.SenderAccount.GetAddress(), sdk.DefaultBondDenom)
+// 	path := ibctesting.NewPath(chainA, chainB)
+// 	path.SetChannelOrdered()
+// 	path.EndpointA.ChannelConfig.PortID = sourcePortID
+// 	path.EndpointB.ChannelConfig.PortID = counterpartPortID
+
+// 	originalBalance := wasmd.IBCTestSupport(t, chainA).BankKeeper().GetBalance(chainA.GetContext(), chainA.SenderAccount.GetAddress(), sdk.DefaultBondDenom)
 
 // 	// with the channels established, let's do a transfer via sdk transfer
 // 	coinToSendToB := sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(1))
 // 	timeoutHeight := clienttypes.NewHeight(1, 110)
-// 	msg := ibctransfertypes.NewMsgTransfer(channelA.PortID, channelA.ID, coinToSendToB, chainA.SenderAccount.GetAddress().String(), chainB.SenderAccount.GetAddress().String(), timeoutHeight, 0)
+// 	msg := ibctransfertypes.NewMsgTransfer(path.EndpointA.ChannelConfig.PortID, path.EndpointA.ChannelID, coinToSendToB, chainA.SenderAccount.GetAddress().String(), chainB.SenderAccount.GetAddress().String(), timeoutHeight, 0)
 // 	err := coordinator.SendMsg(chainA, chainB, clientB, msg)
 // 	require.NoError(t, err)
 
 // 	// when relay to chain B and handle Ack on chain A
 // 	fungibleTokenPacket := ibctransfertypes.NewFungibleTokenPacketData(coinToSendToB.Denom, coinToSendToB.Amount.Uint64(), chainA.SenderAccount.GetAddress().String(), chainB.SenderAccount.GetAddress().String())
-// 	packet := channeltypes.NewPacket(fungibleTokenPacket.GetBytes(), 1, channelA.PortID, channelA.ID, channelB.PortID, channelB.ID, timeoutHeight, 0)
+// 	packet := channeltypes.NewPacket(fungibleTokenPacket.GetBytes(), 1, path.EndpointA.ChannelConfig.PortID, path.EndpointA.ChannelID, path.EndpointB.ChannelConfig.PortID, path.EndpointB.ChannelID, timeoutHeight, 0)
 // 	ack := channeltypes.NewResultAcknowledgement([]byte{byte(1)}).Acknowledgement()
 // 	err = coordinator.RelayPacket(chainA, chainB, clientA, clientB, packet, ack)
 // 	require.NoError(t, err)
 
 // 	// then
-// 	newBalance := wasmd.NewTestSupport(t, chainA.App).BankKeeper().GetBalance(chainA.GetContext(), chainA.SenderAccount.GetAddress(), sdk.DefaultBondDenom)
+// 	newBalance := wasmd.IBCTestSupport(t, chainA).BankKeeper().GetBalance(chainA.GetContext(), chainA.SenderAccount.GetAddress(), sdk.DefaultBondDenom)
 // 	assert.Equal(t, originalBalance.Sub(coinToSendToB), newBalance)
 
-// 	voucherDenom := ibctransfertypes.ParseDenomTrace(ibctransfertypes.GetPrefixedDenom(channelB.PortID, channelB.ID, coinToSendToB.Denom)).IBCDenom()
-// 	bankKeeperB := wasmd.NewTestSupport(t, chainB.App).BankKeeper()
+// 	voucherDenom := ibctransfertypes.ParseDenomTrace(ibctransfertypes.GetPrefixedDenom(path.EndpointB.ChannelConfig.PortID, path.EndpointB.ChannelID, coinToSendToB.Denom)).IBCDenom()
+// 	bankKeeperB := wasmd.IBCTestSupport(t, chainB).BankKeeper()
 // 	chainBBalance := bankKeeperB.GetBalance(chainB.GetContext(), chainB.SenderAccount.GetAddress(), voucherDenom)
 // 	// note: the contract is called during check and deliverTX but the context used in the contract does not rollback
 // 	// so that we got twice the amount
@@ -126,7 +131,7 @@ package wasm_test
 // 	err = coordinator.RelayPacket(chainA, chainB, clientA, clientB, packet, ack.GetResult())
 // 	require.NoError(t, err) // relay committed
 
-// 	bankKeeperB := wasmd.NewTestSupport(t, chainB.App).BankKeeper()
+// 	bankKeeperB := wasmd.IBCTestSupport(t, chainB).BankKeeper()
 // 	voucherDenom := ibctransfertypes.ParseDenomTrace(ibctransfertypes.GetPrefixedDenom(channelB.PortID, channelB.ID, coinToSendToB.Denom)).IBCDenom()
 // 	newBalance := bankKeeperB.GetBalance(chainB.GetContext(), receiverAddress, voucherDenom)
 // 	assert.Equal(t, sdk.NewCoin(voucherDenom, coinToSendToB.Amount).String(), newBalance.String(), bankKeeperB.GetAllBalances(chainB.GetContext(), chainB.SenderAccount.GetAddress()))
@@ -150,7 +155,7 @@ package wasm_test
 // 	myContractAddr := chainA.SeedNewContractInstance()
 // 	myContract.contractAddr = myContractAddr.String()
 // 	var (
-// 		sourcePortID      = chainA.ContractInfo(myContractAddr).IBCPortID
+// 		sourcePortID      = wasmd.ContractInfo(t, chainA, myContractAddr).IBCPortID
 // 		counterpartPortID = ibctransfertypes.ModuleName
 // 	)
 
@@ -172,7 +177,7 @@ package wasm_test
 // 			ChannelID:       channelA.ID,
 // 			CoinsToSend:     coinToSendToB,
 // 			ReceiverAddr:    receiverAddress.String(),
-// 			ContractIBCPort: chainA.ContractInfo(myContractAddr).IBCPortID,
+// 			ContractIBCPort: wasmd.ContractInfo(t, chainA, myContractAddr).IBCPortID,
 // 			Timeout:         timeout,
 // 		}.GetBytes(),
 // 	}
@@ -186,7 +191,7 @@ package wasm_test
 // 	err = coordinator.RelayPacket(chainA, chainB, clientA, clientB, packet, ack.GetResult())
 // 	require.NoError(t, err) // relay committed
 
-// 	bankKeeperB := wasmd.NewTestSupport(t, chainB.App).BankKeeper()
+// 	bankKeeperB := wasmd.IBCTestSupport(t, chainB).BankKeeper()
 // 	voucherDenom := ibctransfertypes.ParseDenomTrace(ibctransfertypes.GetPrefixedDenom(channelB.PortID, channelB.ID, coinToSendToB.Denom)).IBCDenom()
 // 	newBalance := bankKeeperB.GetBalance(chainB.GetContext(), receiverAddress, voucherDenom)
 // 	assert.Equal(t, sdk.NewCoin(voucherDenom, coinToSendToB.Amount).String(), newBalance.String(), bankKeeperB.GetAllBalances(chainB.GetContext(), chainB.SenderAccount.GetAddress()))
@@ -210,7 +215,7 @@ package wasm_test
 // 	myContractAddr := chainA.SeedNewContractInstance()
 // 	myContract.contractAddr = myContractAddr.String()
 // 	var (
-// 		sourcePortID      = chainA.ContractInfo(myContractAddr).IBCPortID
+// 		sourcePortID      = wasmd.ContractInfo(t, chainA, myContractAddr).IBCPortID
 // 		counterpartPortID = ibctransfertypes.ModuleName
 // 	)
 
@@ -230,7 +235,7 @@ package wasm_test
 // 			ChannelID:       channelA.ID,
 // 			CoinsToSend:     coinToSendToB,
 // 			ReceiverAddr:    receiverAddress.String(),
-// 			ContractIBCPort: chainA.ContractInfo(myContractAddr).IBCPortID,
+// 			ContractIBCPort: wasmd.ContractInfo(t, chainA, myContractAddr).IBCPortID,
 // 			Timeout:         timeout,
 // 		}.GetBytes(),
 // 	}
@@ -248,7 +253,7 @@ package wasm_test
 // 	require.NoError(t, err)
 
 // 	// then verify account has no vouchers
-// 	bankKeeperB := wasmd.NewTestSupport(t, chainB.App).BankKeeper()
+// 	bankKeeperB := wasmd.IBCTestSupport(t, chainB).BankKeeper()
 // 	voucherDenom := ibctransfertypes.ParseDenomTrace(ibctransfertypes.GetPrefixedDenom(channelB.PortID, channelB.ID, coinToSendToB.Denom)).IBCDenom()
 // 	newBalance := bankKeeperB.GetBalance(chainB.GetContext(), receiverAddress, voucherDenom)
 // 	assert.Equal(t, sdk.NewInt64Coin(voucherDenom, 0).String(), newBalance.String(), bankKeeperB.GetAllBalances(chainB.GetContext(), chainB.SenderAccount.GetAddress()))
@@ -277,8 +282,8 @@ package wasm_test
 // 	_ = chainB.SeedNewContractInstance() // skip one instance
 // 	myContractAddrB := chainB.SeedNewContractInstance()
 // 	var (
-// 		sourcePortID      = chainA.ContractInfo(myContractAddrA).IBCPortID
-// 		counterpartPortID = chainB.ContractInfo(myContractAddrB).IBCPortID
+// 		sourcePortID      = wasmd.ContractInfo(t, chainA, myContractAddrA).IBCPortID
+// 		counterpartPortID = wasmd.ContractInfo(t, chainB, myContractAddrB).IBCPortID
 // 	)
 
 // 	_, _, connA, connB := coordinator.SetupClientConnections(chainA, chainB, ibcexported.Tendermint)
@@ -419,7 +424,7 @@ package wasm_test
 // 	// call original ibctransfer keeper to not copy all code into this
 // 	ibcPacket := toIBCPacket(packet)
 // 	ctx := c.chain.GetContext() // HACK: please note that this is not reverted after checkTX
-// 	err := c.chain.TestSupport().TransferKeeper().OnRecvPacket(ctx, ibcPacket, src)
+// 	err := wasmd.IBCTestSupport(c.t, c.chain).TransferKeeper().OnRecvPacket(ctx, ibcPacket, src)
 // 	if err != nil {
 // 		return nil, 0, sdkerrors.Wrap(err, "within our smart contract")
 // 	}
@@ -444,7 +449,7 @@ package wasm_test
 // 	// call original ibctransfer keeper to not copy all code into this
 // 	ctx := c.chain.GetContext() // HACK: please note that this is not reverted after checkTX
 // 	ibcPacket := toIBCPacket(packetAck.OriginalPacket)
-// 	err := c.chain.TestSupport().TransferKeeper().OnAcknowledgementPacket(ctx, ibcPacket, data, ack)
+// 	err := wasmd.IBCTestSupport(c.t, c.chain).TransferKeeper().OnAcknowledgementPacket(ctx, ibcPacket, data, ack)
 // 	if err != nil {
 // 		return nil, 0, sdkerrors.Wrap(err, "within our smart contract")
 // 	}

@@ -22,8 +22,8 @@ var wasmIdent = []byte("\x00\x61\x73\x6D")
 // Address is the contract address for this instance. Test should make use of this data and/or use NewIBCContractMockWasmer
 // for using a contract mock in Go.
 func (c *TestChain) SeedNewContractInstance() sdk.AccAddress {
-	//pInstResp := c.StoreCode(append(wasmIdent, rand.Bytes(10)...))
-	pInstResp := c.StoreCodeFile("./keeper/testdata/reflect.wasm")
+	// No longer likes the randomly created wasm, so we just use a test file now
+	pInstResp := c.StoreCodeFile("./testdata/test.wasm")
 	codeID := pInstResp.CodeID
 	anyAddressStr := c.SenderAccount.GetAddress().String()
 	initMsg := []byte(fmt.Sprintf(`{"verifier": %q, "beneficiary": %q}`, anyAddressStr, anyAddressStr))

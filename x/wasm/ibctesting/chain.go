@@ -38,6 +38,7 @@ import (
 
 	"github.com/CosmWasm/wasmd/x/wasm/ibctesting/mock"
 	"github.com/CosmWasm/wasmd/x/wasm/ibctesting/simapp"
+	"github.com/CosmWasm/wasmd/x/wasm/keeper"
 )
 
 // TestChain is a testing struct that wraps a simapp with the last TM Header, the current ABCI
@@ -80,7 +81,7 @@ type PacketAck struct {
 //
 // Time management is handled by the Coordinator in order to ensure synchrony between chains.
 // Each update of any chain increments the block header time for all chains by 5 seconds.
-func NewTestChain(t *testing.T, coord *Coordinator, chainID string) *TestChain {
+func NewTestChain(t *testing.T, coord *Coordinator, chainID string, opts ...keeper.Option) *TestChain {
 	// generate validator private/public key
 	privVal := mock.NewPV()
 	pubKey, err := privVal.GetPubKey()
@@ -99,7 +100,7 @@ func NewTestChain(t *testing.T, coord *Coordinator, chainID string) *TestChain {
 		Coins:   sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(100000000000000))),
 	}
 
-	app := SetupWithGenesisValSet(t, valSet, []authtypes.GenesisAccount{acc}, balance)
+	app := SetupWithGenesisValSet(t, valSet, []authtypes.GenesisAccount{acc}, opts, balance)
 
 	// create current header and call begin block
 	header := tmproto.Header{

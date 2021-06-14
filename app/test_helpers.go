@@ -64,22 +64,20 @@ func setup(withGenesis bool, invCheckPeriod uint, opts ...wasm.Option) (*WasmApp
 	return app, GenesisState{}
 }
 
-func SetupTestingApp(opts ...wasm.Option) func() (ibctesting.TestingApp, map[string]json.RawMessage) {
-	return func() (ibctesting.TestingApp, map[string]json.RawMessage) {
-		app := NewWasmApp(
-			log.NewNopLogger(),
-			dbm.NewMemDB(),
-			nil,
-			true,
-			map[int64]bool{},
-			DefaultNodeHome,
-			5,
-			wasm.EnableAllProposals,
-			EmptyBaseAppOptions{},
-			opts,
-		)
-		return app, NewDefaultGenesisState()
-	}
+func SetupTestingApp(opts ...wasm.Option) (ibctesting.TestingApp, map[string]json.RawMessage) {
+	app := NewWasmApp(
+		log.NewNopLogger(),
+		dbm.NewMemDB(),
+		nil,
+		true,
+		map[int64]bool{},
+		DefaultNodeHome,
+		5,
+		wasm.EnableAllProposals,
+		EmptyBaseAppOptions{},
+		opts,
+	)
+	return app, NewDefaultGenesisState()
 }
 
 // Setup initializes a new WasmApp. A Nop logger is set in WasmApp.
