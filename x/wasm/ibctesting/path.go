@@ -73,3 +73,13 @@ func (path *Path) RelayPacket(packet channeltypes.Packet, ack []byte) error {
 
 	return fmt.Errorf("packet commitment does not exist on either endpoint for provided packet")
 }
+
+func (path *Path) CloseChannels() error {
+	if err := path.EndpointA.ChanCloseInit(); err != nil {
+		return err
+	}
+	if err := path.EndpointB.ChanCloseInit(); err != nil {
+		return err
+	}
+	return nil
+}

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	channeltypes "github.com/cosmos/ibc-go/modules/core/04-channel/types"
+	host "github.com/cosmos/ibc-go/modules/core/24-host"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
 
@@ -284,14 +286,27 @@ func (coord *Coordinator) RelayAndAckPendingPackets(path *Path) error {
 	return nil
 }
 
-func (coord *Coordinator) CloseChannel(path *Path) {
-	err := path.EndpointA.ChanCloseInit()
-	require.NoError(coord.t, err)
-	err = path.EndpointB.ChanCloseInit()
-	require.NoError(coord.t, err)
-	//coord.IncrementTime()
-	//err = coord.UpdateClient(counterparty, source, counterpartyChannel.ClientID, exported.Tendermint)
-	//require.NoError(coord.t, err)
-	//err = coord.ChanCloseConfirm(source, counterparty, channel, counterpartyChannel)
-	//require.NoError(coord.t, err)
+// TimeoutPacket returns the package to source chain to let the IBC app revert any operation.
+func (coord *Coordinator) TimeoutPacket(path *Path, packet channeltypes.Packet) error {
+	// get proof of packet unreceived on dest
+	packetKey := host.PacketReceiptKey(packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
+	proofUnreceived, proofHeight := path.EndpointB.QueryProof(packetKey)
+
+	// Increment time and commit block so that 5 second delay period passes between send and receive
+	coord.IncrementTime()
+	coord.CommitBlock(path.EndpointA.Chain, path.EndpointB.Chain)
+
+	k := path.EndpointA.Chain.App.GetIBCKeeper()
+	ctx := path.EndpointA.Chain.GetContext()
+
+	channel, _ := k.ChannelKeeper.GetChannel(ctx, packet.GetSourcePort(), packet.GetSourceChannel())
+	connectionEnd, _ := k.ConnectionKeeper.GetConnection(ctx, channel.ConnectionHops[0])
+	proofTimestamp, _ := k.ConnectionKeeper.GetTimestampAtHeight(ctx, connectionEnd, proofHeight)
+
+	// TODO: Figure out how to move the proof timestamp past the timeout...
+	coord.t.Logf("packet timeout %d\n", packet.TimeoutTimestamp)
+	coord.t.Logf("proofTimestamp %d\n", proofTimestamp)
+
+	err := k.ChannelKeeper.TimeoutPacket(ctx, packet, proofUnreceived, proofHeight, packet.Sequence)
+	return err
 }

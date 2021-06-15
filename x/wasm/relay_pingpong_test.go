@@ -90,13 +90,11 @@ func TestPinPong(t *testing.T) {
 		activePlayer  = ping
 		pingBallValue = startValue
 	)
-	//seq := uint64(1)
 	for i := 1; i <= rounds; i++ {
-		seq := uint64(i) * 2 // Why!???!
 		t.Logf("++ round: %d\n", i)
 		ball := NewHit(activePlayer, pingBallValue)
 
-		pkg := channeltypes.NewPacket(ball.GetBytes(), seq,
+		pkg := channeltypes.NewPacket(ball.GetBytes(), uint64(i*2),
 			path.EndpointA.ChannelConfig.PortID, path.EndpointA.ChannelID,
 			path.EndpointB.ChannelConfig.PortID, path.EndpointB.ChannelID, doNotTimeout, 0)
 		ack := ball.BuildAck()
@@ -109,7 +107,7 @@ func TestPinPong(t *testing.T) {
 		// switch side
 		activePlayer = counterParty(activePlayer)
 		ball = NewHit(activePlayer, uint64(i))
-		pkg = channeltypes.NewPacket(ball.GetBytes(), seq,
+		pkg = channeltypes.NewPacket(ball.GetBytes(), uint64(i*2),
 			path.EndpointB.ChannelConfig.PortID, path.EndpointB.ChannelID,
 			path.EndpointA.ChannelConfig.PortID, path.EndpointA.ChannelID, doNotTimeout, 0)
 		ack = ball.BuildAck()

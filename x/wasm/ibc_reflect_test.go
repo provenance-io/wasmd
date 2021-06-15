@@ -70,7 +70,8 @@ func TestIBCReflectContract(t *testing.T) {
 	require.Empty(t, account.RemoteBalance)
 
 	// close channel
-	coordinator.CloseChannel(path)
+	err = path.CloseChannels()
+	require.NoError(t, err)
 
 	// let's query the source contract and make sure it registered an address
 	account = AccountResponse{}
