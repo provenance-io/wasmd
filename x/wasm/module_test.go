@@ -236,17 +236,15 @@ func TestHandleExecute(t *testing.T) {
 	contractBech32Addr := parseInitResponse(t, res.Data)
 
 	require.Equal(t, "cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5", contractBech32Addr)
-	// this should be standard x/wasm init event, plus a bank send event (2), with no custom contract events
 	require.Equal(t, 5, len(res.Events), prettyEvents(res.Events))
 
-	//
-	// TODO: Verify event types and attributes ???
-	//
-	// assert.Equal(t, "transfer", res.Events[0].Type)
-	// assert.Equal(t, "wasm", res.Events[1].Type)
-	// assertAttribute(t, "contract_address", contractBech32Addr, res.Events[1].Attributes[0])
-	// assert.Equal(t, "message", res.Events[2].Type)
-	// assertAttribute(t, "module", "wasm", res.Events[2].Attributes[0])
+	assert.Equal(t, "coin_spent", res.Events[0].Type)
+	assert.Equal(t, "coin_received", res.Events[1].Type)
+	assert.Equal(t, "transfer", res.Events[2].Type)
+	assert.Equal(t, "wasm", res.Events[3].Type)
+	assertAttribute(t, "contract_address", contractBech32Addr, res.Events[3].Attributes[0])
+	assert.Equal(t, "message", res.Events[4].Type)
+	assertAttribute(t, "module", "wasm", res.Events[4].Attributes[0])
 
 	// ensure bob doesn't exist
 	bobAcct := data.acctKeeper.GetAccount(data.ctx, bob)
@@ -275,29 +273,36 @@ func TestHandleExecute(t *testing.T) {
 	// from https://github.com/CosmWasm/cosmwasm/blob/master/contracts/hackatom/src/contract.rs#L167
 	assertExecuteResponse(t, res.Data, []byte{0xf0, 0x0b, 0xaa})
 
-	// this should be standard x/wasm init event, plus 2 bank send event, plus a special event from the contract
 	require.Equal(t, 8, len(res.Events), prettyEvents(res.Events))
 
-	//
-	// TODO: Verify event types and attributes ???
-	//
-	// require.Equal(t, "transfer", res.Events[0].Type)
-	// require.Len(t, res.Events[0].Attributes, 3)
-	// assertAttribute(t, "recipient", contractBech32Addr, res.Events[0].Attributes[0])
-	// assertAttribute(t, "sender", fred.String(), res.Events[0].Attributes[1])
-	// assertAttribute(t, "amount", "5000denom", res.Events[0].Attributes[2])
-	// // custom contract event
-	// assert.Equal(t, "wasm", res.Events[1].Type)
-	// assertAttribute(t, "contract_address", contractBech32Addr, res.Events[1].Attributes[0])
-	// assertAttribute(t, "action", "release", res.Events[1].Attributes[1])
-	// // second transfer (this without conflicting message)
-	// assert.Equal(t, "transfer", res.Events[2].Type)
-	// assertAttribute(t, "recipient", bob.String(), res.Events[2].Attributes[0])
-	// assertAttribute(t, "sender", contractBech32Addr, res.Events[2].Attributes[1])
-	// assertAttribute(t, "amount", "105000denom", res.Events[2].Attributes[2])
-	// // finally, standard x/wasm tag
-	// assert.Equal(t, "message", res.Events[3].Type)
-	// assertAttribute(t, "module", "wasm", res.Events[3].Attributes[0])
+	assert.Equal(t, "coin_spent", res.Events[0].Type)
+	assertAttribute(t, "spender", fred.String(), res.Events[0].Attributes[0])
+	assert.Equal(t, "coin_received", res.Events[1].Type)
+	assertAttribute(t, "receiver", contractBech32Addr, res.Events[1].Attributes[0])
+
+	require.Equal(t, "transfer", res.Events[2].Type)
+	require.Len(t, res.Events[2].Attributes, 3)
+	assertAttribute(t, "recipient", contractBech32Addr, res.Events[2].Attributes[0])
+	assertAttribute(t, "sender", fred.String(), res.Events[2].Attributes[1])
+	assertAttribute(t, "amount", "5000denom", res.Events[2].Attributes[2])
+	// custom contract event
+	assert.Equal(t, "wasm", res.Events[3].Type)
+	assertAttribute(t, "contract_address", contractBech32Addr, res.Events[3].Attributes[0])
+	assertAttribute(t, "action", "release", res.Events[3].Attributes[1])
+
+	assert.Equal(t, "coin_spent", res.Events[4].Type)
+	assertAttribute(t, "spender", contractBech32Addr, res.Events[4].Attributes[0])
+	assert.Equal(t, "coin_received", res.Events[5].Type)
+	assertAttribute(t, "receiver", bob.String(), res.Events[5].Attributes[0])
+
+	// second transfer (this without conflicting message)
+	assert.Equal(t, "transfer", res.Events[6].Type)
+	assertAttribute(t, "recipient", bob.String(), res.Events[6].Attributes[0])
+	assertAttribute(t, "sender", contractBech32Addr, res.Events[6].Attributes[1])
+	assertAttribute(t, "amount", "105000denom", res.Events[6].Attributes[2])
+	// finally, standard x/wasm tag
+	assert.Equal(t, "message", res.Events[7].Type)
+	assertAttribute(t, "module", "wasm", res.Events[7].Attributes[0])
 
 	// ensure bob now exists and got both payments released
 	bobAcct = data.acctKeeper.GetAccount(data.ctx, bob)

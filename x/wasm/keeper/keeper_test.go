@@ -1012,17 +1012,28 @@ func TestMigrateWithDispatchedMessage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "burnt 1 keys", string(res.Data))
 	assert.Equal(t, "", res.Log)
-	//
-	// TODO: Verify expected events here
-	//
-	//type dict map[string]interface{}
-	/*expEvents := []dict{
+	type dict map[string]interface{}
+	expEvents := []dict{
 		{
 			"Type": "wasm",
 			"Attr": []dict{
 				{"contract_address": contractAddr},
 				{"action": "burn"},
 				{"payout": myPayoutAddr},
+			},
+		},
+		{
+			"Type": "coin_spent",
+			"Attr": []dict{
+				{"spender": contractAddr},
+				{"amount": "100000denom"},
+			},
+		},
+		{
+			"Type": "coin_received",
+			"Attr": []dict{
+				{"receiver": myPayoutAddr},
+				{"amount": "100000denom"},
 			},
 		},
 		{
@@ -1045,9 +1056,9 @@ func TestMigrateWithDispatchedMessage(t *testing.T) {
 				{"module": "bank"},
 			},
 		},
-	}*/
-	//expJSONEvts := string(mustMarshal(t, expEvents))
-	//assert.JSONEq(t, expJSONEvts, prettyEvents(t, ctx.EventManager().Events()))
+	}
+	expJSONEvts := string(mustMarshal(t, expEvents))
+	assert.JSONEq(t, expJSONEvts, prettyEvents(t, ctx.EventManager().Events()))
 
 	// all persistent data cleared
 	m := keepers.WasmKeeper.QueryRaw(ctx, contractAddr, []byte("config"))
