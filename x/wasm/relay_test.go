@@ -266,21 +266,26 @@ func TestContractCanEmulateIBCTransferMessageWithTimeout(t *testing.T) {
 			Timeout:         timeout,
 		}.GetBytes(),
 	}
+	_, err := chainA.SendMsgs(startMsg)
+	require.NoError(t, err)
 
 	// Send packet to chainA
-	_, err := chainA.SendMsgs(startMsg)
+	require.Equal(t, 1, len(chainA.PendingSendPackets))
+	packet := chainA.PendingSendPackets[0]
+	packet.Sequence++
+	err = path.EndpointA.SendPacket(packet)
+	require.NoError(t, err)
+	// Need to update chainA's client representing chainB to prove missing ack
+	err = path.EndpointA.UpdateClient()
 	require.NoError(t, err)
 
 	// timeout packet send (by the relayer)
 	fungibleTokenPacketData := ibctransfertypes.NewFungibleTokenPacketData(
 		coinToSendToB.Denom, coinToSendToB.Amount.Uint64(), myContractAddr.String(), receiverAddress.String())
 	var timeoutHeight clienttypes.Height
-	packet := channeltypes.NewPacket(fungibleTokenPacketData.GetBytes(), 1,
+	packet = channeltypes.NewPacket(fungibleTokenPacketData.GetBytes(), 1,
 		path.EndpointA.ChannelConfig.PortID, path.EndpointA.ChannelID,
 		path.EndpointB.ChannelConfig.PortID, path.EndpointB.ChannelID, timeoutHeight, timeout)
-
-	// TODO: Fix TimeoutPacket error: "packet timeout has not been reached for height or timestamp: packet timeout"
-	t.Logf("packet  %s\n", packet.String())
 	err = coordinator.TimeoutPacket(path, packet)
 	require.NoError(t, err)
 

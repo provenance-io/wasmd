@@ -296,22 +296,8 @@ func (coord *Coordinator) TimeoutPacket(path *Path, packet channeltypes.Packet) 
 	coord.IncrementTime()
 	coord.CommitBlock(path.EndpointA.Chain, path.EndpointB.Chain)
 
-	k := path.EndpointA.Chain.App.GetIBCKeeper()
-	ctx := path.EndpointA.Chain.GetContext()
-
-	channel, _ := k.ChannelKeeper.GetChannel(ctx, packet.GetSourcePort(), packet.GetSourceChannel())
-	connectionEnd, _ := k.ConnectionKeeper.GetConnection(ctx, channel.ConnectionHops[0])
-	proofTimestamp, _ := k.ConnectionKeeper.GetTimestampAtHeight(ctx, connectionEnd, proofHeight)
-
-	// TODO: Figure out how to actually trigger a timeout. The proof timestamp is always < the
-	// packet timeout timestamp right now.
-	coord.t.Logf("coord time     %d\n", coord.CurrentTime.UnixNano())
-	coord.t.Logf("packet timeout %d\n", packet.TimeoutTimestamp)
-	coord.t.Logf("proofTimestamp %d\n", proofTimestamp)
-
-	err := k.ChannelKeeper.TimeoutPacket(ctx, packet, proofUnreceived, proofHeight, packet.Sequence)
-	if err != nil {
-		coord.t.Logf("TimeoutPacket: %s\n", err)
-	}
+	timeoutMsg := channeltypes.NewMsgTimeout(
+		packet, packet.Sequence, proofUnreceived, proofHeight, path.EndpointA.Chain.SenderAccount.GetAddress().String())
+	_, err := path.EndpointA.Chain.SendMsgs(timeoutMsg)
 	return err
 }
