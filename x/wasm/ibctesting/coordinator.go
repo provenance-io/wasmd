@@ -292,7 +292,7 @@ func (coord *Coordinator) TimeoutPacket(path *Path, packet channeltypes.Packet) 
 	packetKey := host.PacketReceiptKey(packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
 	proofUnreceived, proofHeight := path.EndpointB.QueryProof(packetKey)
 
-	// Increment time and commit block so that 5 second delay period passes between send and receive
+	// Increment time and commit block so that a delay period passes between send and receive
 	coord.IncrementTime()
 	coord.CommitBlock(path.EndpointA.Chain, path.EndpointB.Chain)
 
@@ -303,10 +303,15 @@ func (coord *Coordinator) TimeoutPacket(path *Path, packet channeltypes.Packet) 
 	connectionEnd, _ := k.ConnectionKeeper.GetConnection(ctx, channel.ConnectionHops[0])
 	proofTimestamp, _ := k.ConnectionKeeper.GetTimestampAtHeight(ctx, connectionEnd, proofHeight)
 
-	// TODO: Figure out how to move the proof timestamp past the timeout...
+	// TODO: Figure out how to actually trigger a timeout. The proof timestamp is always < the
+	// packet timeout timestamp right now.
+	coord.t.Logf("coord time     %d\n", coord.CurrentTime.UnixNano())
 	coord.t.Logf("packet timeout %d\n", packet.TimeoutTimestamp)
 	coord.t.Logf("proofTimestamp %d\n", proofTimestamp)
 
 	err := k.ChannelKeeper.TimeoutPacket(ctx, packet, proofUnreceived, proofHeight, packet.Sequence)
+	if err != nil {
+		coord.t.Logf("TimeoutPacket: %s\n", err)
+	}
 	return err
 }

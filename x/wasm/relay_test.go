@@ -233,8 +233,8 @@ func TestContractCanEmulateIBCTransferMessageWithTimeout(t *testing.T) {
 		chainA = coordinator.GetChain(ibctesting.GetChainID(0))
 		chainB = coordinator.GetChain(ibctesting.GetChainID(1))
 	)
-	coordinator.CommitBlock(chainA, chainB)
 	myContractAddr := chainA.SeedNewContractInstance()
+	coordinator.CommitBlock(chainA, chainB)
 	myContract.contractAddr = myContractAddr.String()
 	var (
 		sourcePortID      = wasmd.ContractInfo(t, chainA, myContractAddr).IBCPortID
@@ -253,8 +253,6 @@ func TestContractCanEmulateIBCTransferMessageWithTimeout(t *testing.T) {
 
 	timeoutTime := chainB.LastHeader.Header.Time.Add(time.Nanosecond)
 	timeout := uint64(timeoutTime.UnixNano())
-
-	coordinator.CommitBlock(chainA, chainB)
 
 	// custom payload data to be transfered into a proper ICS20 ibc packet
 	startMsg := &types.MsgExecuteContract{
@@ -283,8 +281,8 @@ func TestContractCanEmulateIBCTransferMessageWithTimeout(t *testing.T) {
 
 	// TODO: Fix TimeoutPacket error: "packet timeout has not been reached for height or timestamp: packet timeout"
 	t.Logf("packet  %s\n", packet.String())
-	//err = coordinator.TimeoutPacket(path, packet)
-	//require.NoError(t, err)
+	err = coordinator.TimeoutPacket(path, packet)
+	require.NoError(t, err)
 
 	// then verify account has no vouchers
 	bankKeeperB := wasmd.IBCTestSupport(t, chainB).BankKeeper()
