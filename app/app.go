@@ -87,6 +87,10 @@ import (
 	ibchost "github.com/cosmos/ibc-go/modules/core/24-host"
 	ibckeeper "github.com/cosmos/ibc-go/modules/core/keeper"
 
+	"github.com/cosmos/cosmos-sdk/x/feegrant"
+	feegrantkeeper "github.com/cosmos/cosmos-sdk/x/feegrant/keeper"
+	feegrantmod "github.com/cosmos/cosmos-sdk/x/feegrant/module"
+
 	// unnamed import of statik for swagger UI support
 	_ "github.com/cosmos/cosmos-sdk/client/docs/statik"
 )
@@ -169,6 +173,7 @@ var (
 		evidence.AppModuleBasic{},
 		transfer.AppModuleBasic{},
 		vesting.AppModuleBasic{},
+		feegrantmod.AppModuleBasic{},
 	)
 
 	// module account permissions
@@ -225,6 +230,7 @@ type WasmApp struct {
 	evidenceKeeper   evidencekeeper.Keeper
 	transferKeeper   ibctransferkeeper.Keeper
 	wasmKeeper       wasm.Keeper
+	feegrantKeeper   feegrantkeeper.Keeper
 
 	scopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	scopedTransferKeeper capabilitykeeper.ScopedKeeper
@@ -256,7 +262,7 @@ func NewWasmApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest b
 		minttypes.StoreKey, distrtypes.StoreKey, slashingtypes.StoreKey,
 		govtypes.StoreKey, paramstypes.StoreKey, ibchost.StoreKey, upgradetypes.StoreKey,
 		evidencetypes.StoreKey, ibctransfertypes.StoreKey, capabilitytypes.StoreKey,
-		wasm.StoreKey,
+		wasm.StoreKey, feegrant.StoreKey,
 	)
 	tkeys := sdk.NewTransientStoreKeys(paramstypes.TStoreKey)
 	memKeys := sdk.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
@@ -393,6 +399,9 @@ func NewWasmApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest b
 		&stakingKeeper,
 		govRouter,
 	)
+
+	app.feegrantKeeper = feegrantkeeper.NewKeeper(appCodec, keys[feegrant.StoreKey], app.accountKeeper)
+
 	/****  Module Options ****/
 
 	// NOTE: we may consider parsing `appOpts` inside module constructors. For the moment
@@ -418,6 +427,7 @@ func NewWasmApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest b
 		staking.NewAppModule(appCodec, app.stakingKeeper, app.accountKeeper, app.bankKeeper),
 		upgrade.NewAppModule(app.upgradeKeeper),
 		wasm.NewAppModule(appCodec, &app.wasmKeeper, app.stakingKeeper),
+		feegrantmod.NewAppModule(appCodec, app.accountKeeper, app.bankKeeper, app.feegrantKeeper, app.interfaceRegistry),
 		evidence.NewAppModule(app.evidenceKeeper),
 		ibc.NewAppModule(app.ibcKeeper),
 		params.NewAppModule(app.paramsKeeper),
@@ -446,7 +456,7 @@ func NewWasmApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest b
 		slashingtypes.ModuleName, govtypes.ModuleName, minttypes.ModuleName, crisistypes.ModuleName,
 		ibchost.ModuleName, genutiltypes.ModuleName, evidencetypes.ModuleName, ibctransfertypes.ModuleName,
 		// wasm after ibc transfer
-		wasm.ModuleName,
+		wasm.ModuleName, feegrant.ModuleName,
 	)
 
 	app.mm.RegisterInvariants(&app.crisisKeeper)
@@ -471,6 +481,7 @@ func NewWasmApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest b
 		slashing.NewAppModule(appCodec, app.slashingKeeper, app.accountKeeper, app.bankKeeper, app.stakingKeeper),
 		params.NewAppModule(app.paramsKeeper),
 		wasm.NewAppModule(appCodec, &app.wasmKeeper, app.stakingKeeper),
+		feegrantmod.NewAppModule(appCodec, app.accountKeeper, app.bankKeeper, app.feegrantKeeper, app.interfaceRegistry),
 		evidence.NewAppModule(app.evidenceKeeper),
 		ibc.NewAppModule(app.ibcKeeper),
 		transferModule,
@@ -490,7 +501,7 @@ func NewWasmApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest b
 		ante.HandlerOptions{
 			AccountKeeper:   app.accountKeeper,
 			BankKeeper:      app.bankKeeper,
-			FeegrantKeeper:  nil, // TODO: Do we need a fee grant keeper here?
+			FeegrantKeeper:  app.feegrantKeeper,
 			SignModeHandler: encodingConfig.TxConfig.SignModeHandler(),
 			SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 		},
