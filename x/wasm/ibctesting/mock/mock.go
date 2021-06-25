@@ -189,7 +189,9 @@ func (am AppModule) OnChanCloseConfirm(sdk.Context, string, string) error {
 }
 
 // OnRecvPacket implements the IBCModule interface.
-func (am AppModule) OnRecvPacket(ctx sdk.Context, packet channeltypes.Packet) exported.Acknowledgement {
+func (am AppModule) OnRecvPacket(
+	ctx sdk.Context, packet channeltypes.Packet, _ sdk.AccAddress,
+) exported.Acknowledgement {
 	// set state by claiming capability to check if revert happens return
 	am.scopedKeeper.NewCapability(ctx, MockCanaryCapabilityName)
 	if bytes.Equal(MockPacketData, packet.GetData()) {
@@ -202,11 +204,15 @@ func (am AppModule) OnRecvPacket(ctx sdk.Context, packet channeltypes.Packet) ex
 }
 
 // OnAcknowledgementPacket implements the IBCModule interface.
-func (am AppModule) OnAcknowledgementPacket(sdk.Context, channeltypes.Packet, []byte) (*sdk.Result, error) {
+func (am AppModule) OnAcknowledgementPacket(
+	sdk.Context, channeltypes.Packet, []byte, sdk.AccAddress,
+) (*sdk.Result, error) {
 	return nil, nil
 }
 
 // OnTimeoutPacket implements the IBCModule interface.
-func (am AppModule) OnTimeoutPacket(sdk.Context, channeltypes.Packet) (*sdk.Result, error) {
+func (am AppModule) OnTimeoutPacket(
+	sdk.Context, channeltypes.Packet, sdk.AccAddress,
+) (*sdk.Result, error) {
 	return nil, nil
 }

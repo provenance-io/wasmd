@@ -127,7 +127,6 @@ var TestingStakeParams = stakingtypes.Params{
 	MaxEntries:        10,
 	HistoricalEntries: 10,
 	BondDenom:         "stake",
-	PowerReduction:    sdk.OneInt(),
 }
 
 type TestKeepers struct {
