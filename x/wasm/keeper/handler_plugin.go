@@ -25,13 +25,13 @@ type msgEncoder interface {
 // SDKMessageHandler can handles messages that can be encoded into sdk.Message types and routed.
 type SDKMessageHandler struct {
 	router    sdk.Router
-	msgRouter *baseapp.MsgServiceRouter
+	msgRouter baseapp.IMsgServiceRouter
 	encoders  msgEncoder
 }
 
 func NewDefaultMessageHandler(
 	router sdk.Router,
-	msgRouter *baseapp.MsgServiceRouter,
+	msgRouter baseapp.IMsgServiceRouter,
 	channelKeeper types.ChannelKeeper,
 	capabilityKeeper types.CapabilityKeeper,
 	bankKeeper types.Burner,
@@ -51,7 +51,7 @@ func NewDefaultMessageHandler(
 }
 
 func NewSDKMessageHandler(
-	router sdk.Router, msgRouter *baseapp.MsgServiceRouter, encoders msgEncoder) SDKMessageHandler {
+	router sdk.Router, msgRouter baseapp.IMsgServiceRouter, encoders msgEncoder) SDKMessageHandler {
 	return SDKMessageHandler{
 		router:    router,
 		msgRouter: msgRouter,
