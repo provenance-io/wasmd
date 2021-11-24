@@ -38,6 +38,8 @@ jobs:
         run: |
           cd ./x/wasm/keeper
           go test -bench .
+          
+          
   wasm-vs-native:
     runs-on: ubuntu-latest
     name: wasm compared to native modules
