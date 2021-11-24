@@ -1,0 +1,54 @@
+name: build and test
+
+on: [push, pull_request]
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: build
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+      - run: go build ./...
+    test:
+      runs-on: ubuntu-latest
+      name: test
+      steps:
+      - uses: actions/checkout@v2
+      - name: Setup go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+      - run: go test ./...
+    wasmgas:
+      runs-on: ubuntu-latest
+      name: wasm gas
+      steps:
+      - uses: actions/checkout@v2
+      - name: Setup go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+      - name: benchmarks
+        run: |
+          cd ./x/wasm/keeper
+          go test -bench .
+     wasm-vs-native:
+      runs-on: ubuntu-latest
+      name: wasm compared to native modules
+      steps:
+      - uses: actions/checkout@v2
+      - name: Setup go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+      - name: wasm vs native
+        run: |
+            cd ./benchmarks
+            go test -bench .
+      
+ 
