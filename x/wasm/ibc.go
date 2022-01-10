@@ -326,5 +326,5 @@ func (i IBCHandler) NegotiateAppVersion(
 	counterparty channeltypes.Counterparty,
 	proposedVersion string,
 ) (version string, err error) {
-	return "", nil
+	return proposedVersion, nil
 }
