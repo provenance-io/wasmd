@@ -90,7 +90,7 @@ func NewKeeper(
 	capabilityKeeper types.CapabilityKeeper,
 	portSource types.ICS20TransferPortSource,
 	router sdk.Router,
-	msgRouter *baseapp.MsgServiceRouter,
+	msgRouter baseapp.IMsgServiceRouter,
 	queryRouter GRPCQueryRouter,
 	homeDir string,
 	wasmConfig types.WasmConfig,
