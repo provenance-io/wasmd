@@ -131,6 +131,6 @@ replace (
 	github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
 	google.golang.org/grpc => google.golang.org/grpc v1.33.2
 
-	github.com/CosmWasm/cosmwasm => ../cosmwasm
-	github.com/CosmWasm/wasmvm => ../wasmvm
+	github.com/CosmWasm/cosmwasm => github.com/provenance-io/cosmwasm v1.0.0-betaprov
+	github.com/CosmWasm/wasmvm => github.com/provenance-io/wasmvm v1.0.0-betaprov
 )
