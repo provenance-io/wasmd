@@ -506,16 +506,18 @@ func getActorAddress(cmd *cobra.Command) (sdk.AccAddress, error) {
 		return nil, err
 	}
 
-	homeDir := client.GetClientContextFromCmd(cmd).HomeDir
+	clientCtx := client.GetClientContextFromCmd(cmd)
+	homeDir := clientCtx.HomeDir
 	// attempt to lookup address from Keybase if no address was provided
-	kb, err := keyring.New(sdk.KeyringServiceName(), keyringBackend, homeDir, inBuf)
+	kb, err := keyring.New(sdk.KeyringServiceName(), keyringBackend, homeDir, inBuf, clientCtx.Codec)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get keyring service name: %w", err)
 	}
 
 	info, err := kb.Key(actorArg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get address from Keybase: %w", err)
 	}
-	return info.GetAddress(), nil
+
+	return info.GetAddress()
 }
