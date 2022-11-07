@@ -373,6 +373,7 @@ func NewWasmApp(
 		app.AccountKeeper,
 		app.GetSubspace(banktypes.ModuleName),
 		app.ModuleAccountAddrs(),
+		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)
 	app.AuthzKeeper = authzkeeper.NewKeeper(
 		keys[authzkeeper.StoreKey],
