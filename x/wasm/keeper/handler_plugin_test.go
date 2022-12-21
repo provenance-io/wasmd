@@ -11,9 +11,9 @@ import (
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	capabilitytypes "github.com/cosmos/cosmos-sdk/x/capability/types"
-	clienttypes "github.com/cosmos/ibc-go/v5/modules/core/02-client/types"
-	channeltypes "github.com/cosmos/ibc-go/v5/modules/core/04-channel/types"
-	ibcexported "github.com/cosmos/ibc-go/v5/modules/core/exported"
+	clienttypes "github.com/cosmos/ibc-go/v6/modules/core/02-client/types"
+	channeltypes "github.com/cosmos/ibc-go/v6/modules/core/04-channel/types"
+	ibcexported "github.com/cosmos/ibc-go/v6/modules/core/exported"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -239,11 +239,20 @@ func TestIBCRawPacketHandler(t *testing.T) {
 				),
 			}, true
 		},
-		SendPacketFn: func(ctx sdk.Context, channelCap *capabilitytypes.Capability, packet ibcexported.PacketI) error {
-			capturedPacket = packet
-			return nil
+
+		SendPacketFn: func(ctx sdk.Context, channelCap *capabilitytypes.Capability, sourcePort string, sourceChannel string, timeoutHeight clienttypes.Height, timeoutTimestamp uint64, data []byte) (uint64, error) {
+			capturedPacket = channeltypes.Packet{
+				Sequence:         1,
+				SourcePort:       sourcePort,
+				SourceChannel:    sourceChannel,
+				TimeoutHeight:    timeoutHeight,
+				TimeoutTimestamp: timeoutTimestamp,
+				Data:             data,
+			}
+			return 1, nil
 		},
 	}
+
 	capKeeper := &wasmtesting.MockCapabilityKeeper{
 		GetCapabilityFn: func(ctx sdk.Context, name string) (*capabilitytypes.Capability, bool) {
 			return &capabilitytypes.Capability{}, true
@@ -266,13 +275,11 @@ func TestIBCRawPacketHandler(t *testing.T) {
 			chanKeeper: chanKeeper,
 			capKeeper:  capKeeper,
 			expPacketSent: channeltypes.Packet{
-				Sequence:           1,
-				SourcePort:         ibcPort,
-				SourceChannel:      "channel-1",
-				DestinationPort:    "other-port",
-				DestinationChannel: "other-channel-1",
-				Data:               []byte("myData"),
-				TimeoutHeight:      clienttypes.Height{RevisionNumber: 1, RevisionHeight: 2},
+				Sequence:      1,
+				SourcePort:    ibcPort,
+				SourceChannel: "channel-1",
+				Data:          []byte("myData"),
+				TimeoutHeight: clienttypes.Height{RevisionNumber: 1, RevisionHeight: 2},
 			},
 		},
 		"sequence not found returns error": {
@@ -286,6 +293,13 @@ func TestIBCRawPacketHandler(t *testing.T) {
 					return 0, false
 				},
 			},
+
+			capKeeper: wasmtesting.MockCapabilityKeeper{
+				GetCapabilityFn: func(ctx sdk.Context, name string) (*capabilitytypes.Capability, bool) {
+					return nil, false
+				},
+			},
+
 			expErr: channeltypes.ErrSequenceSendNotFound,
 		},
 		"capability not found returns error": {
