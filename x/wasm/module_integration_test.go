@@ -15,7 +15,7 @@ import (
 )
 
 func TestModuleMigrations(t *testing.T) {
-	wasmApp := app.Setup(false)
+	wasmApp := app.SetupWasmAppWithValSet(t)
 	ctx := wasmApp.BaseApp.NewContext(false, tmproto.Header{})
 	upgradeHandler := func(ctx sdk.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 		return wasmApp.ModuleManager().RunMigrations(ctx, wasmApp.ModuleConfigurator(), fromVM)
@@ -27,5 +27,5 @@ func TestModuleMigrations(t *testing.T) {
 	gotVM, err := wasmApp.ModuleManager().RunMigrations(ctx, wasmApp.ModuleConfigurator(), fromVM)
 	// then
 	require.NoError(t, err)
-	assert.Equal(t, uint64(1), gotVM[wasm.ModuleName])
+	assert.Equal(t, uint64(2), gotVM[wasm.ModuleName])
 }

@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/docker/distribution/reference"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
@@ -13,17 +18,18 @@ import (
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
 
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
 func ProposalStoreCodeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "wasm-store [wasm file] --title [text] --description [text] --run-as [address]",
+		Use:   "wasm-store [wasm file] --title [text] --description [text] --run-as [address] --unpin-code [unpin_code] --source [source] --builder [builder] --code-hash [code_hash]",
 		Short: "Submit a wasm binary proposal",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
@@ -39,11 +45,11 @@ func ProposalStoreCodeCmd() *cobra.Command {
 			if len(runAs) == 0 {
 				return errors.New("run-as address is required")
 			}
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -51,7 +57,7 @@ func ProposalStoreCodeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -61,6 +67,10 @@ func ProposalStoreCodeCmd() *cobra.Command {
 				return err
 			}
 
+			source, builder, codeHash, err := parseVerificationFlags(src.WASMByteCode, cmd.Flags())
+			if err != nil {
+				return err
+			}
 			content := types.StoreCodeProposal{
 				Title:                 proposalTitle,
 				Description:           proposalDescr,
@@ -68,6 +78,9 @@ func ProposalStoreCodeCmd() *cobra.Command {
 				WASMByteCode:          src.WASMByteCode,
 				InstantiatePermission: src.InstantiatePermission,
 				UnpinCode:             unpinCode,
+				Source:                source,
+				Builder:               builder,
+				CodeHash:              codeHash,
 			}
 
 			msg, err := govtypes.NewMsgSubmitProposal(&content, deposit, clientCtx.GetFromAddress())
@@ -87,6 +100,10 @@ func ProposalStoreCodeCmd() *cobra.Command {
 	cmd.Flags().String(flagInstantiateNobody, "", "Nobody except the governance process can instantiate a contract from the code, optional")
 	cmd.Flags().String(flagInstantiateByAddress, "", "Only this address can instantiate a contract instance from the code, optional")
 	cmd.Flags().Bool(flagUnpinCode, false, "Unpin code on upload, optional")
+	cmd.Flags().StringSlice(flagInstantiateByAnyOfAddress, []string{}, "Any of the addresses can instantiate a contract from the code, optional")
+	cmd.Flags().String(flagSource, "", "Code Source URL is a valid absolute HTTPS URI to the contract's source code,")
+	cmd.Flags().String(flagBuilder, "", "Builder is a valid docker image name with tag, such as \"cosmwasm/workspace-optimizer:0.12.9\"")
+	cmd.Flags().BytesHex(flagCodeHash, nil, "CodeHash is the sha256 hash of the wasm code")
 
 	// proposal flags
 	cmd.Flags().String(cli.FlagTitle, "", "Title of proposal")             //nolint:staticcheck
@@ -98,13 +115,55 @@ func ProposalStoreCodeCmd() *cobra.Command {
 	return cmd
 }
 
+func parseVerificationFlags(wasm []byte, flags *flag.FlagSet) (string, string, []byte, error) {
+	source, err := flags.GetString(flagSource)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("source: %s", err)
+	}
+	builder, err := flags.GetString(flagBuilder)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("builder: %s", err)
+	}
+	codeHash, err := flags.GetBytesHex(flagCodeHash)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("codeHash: %s", err)
+	}
+
+	// if any set require others to be set
+	if len(source) != 0 || len(builder) != 0 || len(codeHash) != 0 {
+		if source == "" {
+			return "", "", nil, fmt.Errorf("source is required")
+		}
+		if _, err = url.ParseRequestURI(source); err != nil {
+			return "", "", nil, fmt.Errorf("source: %s", err)
+		}
+		if builder == "" {
+			return "", "", nil, fmt.Errorf("builder is required")
+		}
+		if _, err := reference.ParseDockerRef(builder); err != nil {
+			return "", "", nil, fmt.Errorf("builder: %s", err)
+		}
+		if len(codeHash) == 0 {
+			return "", "", nil, fmt.Errorf("code hash is required")
+		}
+		// wasm is unzipped in parseStoreCodeArgs
+		// checksum generation will be decoupled here
+		// reference https://github.com/CosmWasm/wasmvm/issues/359
+		checksum := sha256.Sum256(wasm)
+		if !bytes.Equal(checksum[:], codeHash) {
+			return "", "", nil, fmt.Errorf("code-hash mismatch: %X, checksum: %X", codeHash, checksum)
+		}
+	}
+	return source, builder, codeHash, nil
+}
+
 func ProposalInstantiateContractCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "instantiate-contract [code_id_int64] [json_encoded_init_args] --label [text] --title [text] --description [text] --run-as [address] --admin [address,optional] --amount [coins,optional]",
 		Short: "Submit an instantiate wasm contract proposal",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
@@ -121,11 +180,11 @@ func ProposalInstantiateContractCmd() *cobra.Command {
 			if len(runAs) == 0 {
 				return errors.New("run-as address is required")
 			}
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -133,7 +192,7 @@ func ProposalInstantiateContractCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -176,13 +235,129 @@ func ProposalInstantiateContractCmd() *cobra.Command {
 	return cmd
 }
 
+func ProposalStoreAndInstantiateContractCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "store-instantiate [wasm file] [json_encoded_init_args] --label [text] --title [text] --description [text] --run-as [address]" +
+			"--unpin-code [unpin_code,optional] --source [source,optional] --builder [builder,optional] --code-hash [code_hash,optional] --admin [address,optional] --amount [coins,optional]",
+		Short: "Submit and instantiate a wasm contract proposal",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
+			if err != nil {
+				return err
+			}
+
+			src, err := parseStoreCodeArgs(args[0], clientCtx.FromAddress, cmd.Flags())
+			if err != nil {
+				return err
+			}
+			runAs, err := cmd.Flags().GetString(flagRunAs)
+			if err != nil {
+				return fmt.Errorf("run-as: %s", err)
+			}
+			if len(runAs) == 0 {
+				return errors.New("run-as address is required")
+			}
+
+			unpinCode, err := cmd.Flags().GetBool(flagUnpinCode)
+			if err != nil {
+				return err
+			}
+
+			source, builder, codeHash, err := parseVerificationFlags(src.WASMByteCode, cmd.Flags())
+			if err != nil {
+				return err
+			}
+
+			amountStr, err := cmd.Flags().GetString(flagAmount)
+			if err != nil {
+				return fmt.Errorf("amount: %s", err)
+			}
+			amount, err := sdk.ParseCoinsNormalized(amountStr)
+			if err != nil {
+				return fmt.Errorf("amount: %s", err)
+			}
+			label, err := cmd.Flags().GetString(flagLabel)
+			if err != nil {
+				return fmt.Errorf("label: %s", err)
+			}
+			if label == "" {
+				return errors.New("label is required on all contracts")
+			}
+			adminStr, err := cmd.Flags().GetString(flagAdmin)
+			if err != nil {
+				return fmt.Errorf("admin: %s", err)
+			}
+			noAdmin, err := cmd.Flags().GetBool(flagNoAdmin)
+			if err != nil {
+				return fmt.Errorf("no-admin: %s", err)
+			}
+
+			// ensure sensible admin is set (or explicitly immutable)
+			if adminStr == "" && !noAdmin {
+				return fmt.Errorf("you must set an admin or explicitly pass --no-admin to make it immutible (wasmd issue #719)")
+			}
+			if adminStr != "" && noAdmin {
+				return fmt.Errorf("you set an admin and passed --no-admin, those cannot both be true")
+			}
+
+			content := types.StoreAndInstantiateContractProposal{
+				Title:                 proposalTitle,
+				Description:           proposalDescr,
+				RunAs:                 runAs,
+				WASMByteCode:          src.WASMByteCode,
+				InstantiatePermission: src.InstantiatePermission,
+				UnpinCode:             unpinCode,
+				Source:                source,
+				Builder:               builder,
+				CodeHash:              codeHash,
+				Admin:                 adminStr,
+				Label:                 label,
+				Msg:                   []byte(args[1]),
+				Funds:                 amount,
+			}
+
+			msg, err := govtypes.NewMsgSubmitProposal(&content, deposit, clientCtx.GetFromAddress())
+			if err != nil {
+				return err
+			}
+			if err = msg.ValidateBasic(); err != nil {
+				return err
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+		SilenceUsage: true,
+	}
+
+	cmd.Flags().String(flagRunAs, "", "The address that is stored as code creator. It is the creator of the contract and passed to the contract as sender on proposal execution")
+	cmd.Flags().String(flagInstantiateByEverybody, "", "Everybody can instantiate a contract from the code, optional")
+	cmd.Flags().String(flagInstantiateNobody, "", "Nobody except the governance process can instantiate a contract from the code, optional")
+	cmd.Flags().String(flagInstantiateByAddress, "", "Only this address can instantiate a contract instance from the code, optional")
+	cmd.Flags().Bool(flagUnpinCode, false, "Unpin code on upload, optional")
+	cmd.Flags().String(flagSource, "", "Code Source URL is a valid absolute HTTPS URI to the contract's source code,")
+	cmd.Flags().String(flagBuilder, "", "Builder is a valid docker image name with tag, such as \"cosmwasm/workspace-optimizer:0.12.9\"")
+	cmd.Flags().BytesHex(flagCodeHash, nil, "CodeHash is the sha256 hash of the wasm code")
+	cmd.Flags().StringSlice(flagInstantiateByAnyOfAddress, []string{}, "Any of the addresses can instantiate a contract from the code, optional")
+	cmd.Flags().String(flagAmount, "", "Coins to send to the contract during instantiation")
+	cmd.Flags().String(flagLabel, "", "A human-readable name for this contract in lists")
+	cmd.Flags().String(flagAdmin, "", "Address of an admin")
+	cmd.Flags().Bool(flagNoAdmin, false, "You must set this explicitly if you don't want an admin")
+
+	// proposal flags
+	cmd.Flags().String(cli.FlagTitle, "", "Title of proposal")
+	cmd.Flags().String(cli.FlagDescription, "", "Description of proposal")
+	cmd.Flags().String(cli.FlagDeposit, "", "Deposit of proposal")
+	return cmd
+}
+
 func ProposalMigrateContractCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate-contract [contract_addr_bech32] [new_code_id_int64] [json_encoded_migration_args]",
 		Short: "Submit a migrate wasm contract to a new code version proposal",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
@@ -192,11 +367,11 @@ func ProposalMigrateContractCmd() *cobra.Command {
 				return err
 			}
 
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -204,7 +379,7 @@ func ProposalMigrateContractCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -245,7 +420,7 @@ func ProposalExecuteContractCmd() *cobra.Command {
 		Short: "Submit a execute wasm contract proposal (run by any address)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
@@ -268,11 +443,11 @@ func ProposalExecuteContractCmd() *cobra.Command {
 			if len(runAs) == 0 {
 				return errors.New("run-as address is required")
 			}
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -280,7 +455,7 @@ func ProposalExecuteContractCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -324,7 +499,7 @@ func ProposalSudoContractCmd() *cobra.Command {
 		Short: "Submit a sudo wasm contract proposal (to call privileged commands)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
@@ -332,11 +507,11 @@ func ProposalSudoContractCmd() *cobra.Command {
 			contract := args[0]
 			sudoMsg := []byte(args[1])
 
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -344,7 +519,7 @@ func ProposalSudoContractCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -384,7 +559,7 @@ func ProposalUpdateContractAdminCmd() *cobra.Command {
 		Short: "Submit a new admin for a contract proposal",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
@@ -394,11 +569,11 @@ func ProposalUpdateContractAdminCmd() *cobra.Command {
 				return err
 			}
 
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -406,7 +581,7 @@ func ProposalUpdateContractAdminCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("deposit: %s", err)
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -500,16 +675,16 @@ func ProposalPinCodesCmd() *cobra.Command {
 		Short: "Submit a pin code proposal for pinning a code to cache",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
 
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -517,7 +692,7 @@ func ProposalPinCodesCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("deposit: %s", err)
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -571,16 +746,16 @@ func ProposalUnpinCodesCmd() *cobra.Command {
 		Short: "Submit a unpin code proposal for unpinning a code to cache",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
+			clientCtx, proposalTitle, proposalDescr, deposit, err := getProposalInfo(cmd)
 			if err != nil {
 				return err
 			}
 
-			proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
+			proposalTitle, err = cmd.Flags().GetString(cli.FlagTitle) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal title: %s", err)
 			}
-			proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
+			proposalDescr, err = cmd.Flags().GetString(cli.FlagDescription) //nolint:staticcheck
 			if err != nil {
 				return fmt.Errorf("proposal description: %s", err)
 			}
@@ -588,7 +763,7 @@ func ProposalUnpinCodesCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("deposit: %s", err)
 			}
-			deposit, err := sdk.ParseCoinsNormalized(depositArg)
+			deposit, err = sdk.ParseCoinsNormalized(depositArg)
 			if err != nil {
 				return err
 			}
@@ -740,4 +915,33 @@ $ %s tx gov submit-proposal update-instantiate-config 1:nobody 2:everybody 3:%s1
 	// type values must match the "ProposalHandler" "routes" in cli
 	cmd.Flags().String(cli.FlagProposalType, "", "Permission of proposal, types: store-code/instantiate/migrate/update-admin/clear-admin/text/parameter_change/software_upgrade") //nolint:staticcheck
 	return cmd
+}
+
+func getProposalInfo(cmd *cobra.Command) (client.Context, string, string, sdk.Coins, error) {
+	clientCtx, err := client.GetClientTxContext(cmd)
+	if err != nil {
+		return client.Context{}, "", "", nil, err
+	}
+
+	proposalTitle, err := cmd.Flags().GetString(cli.FlagTitle)
+	if err != nil {
+		return clientCtx, proposalTitle, "", nil, err
+	}
+
+	proposalDescr, err := cmd.Flags().GetString(cli.FlagDescription)
+	if err != nil {
+		return client.Context{}, proposalTitle, proposalDescr, nil, err
+	}
+
+	depositArg, err := cmd.Flags().GetString(cli.FlagDeposit)
+	if err != nil {
+		return client.Context{}, proposalTitle, proposalDescr, nil, err
+	}
+
+	deposit, err := sdk.ParseCoinsNormalized(depositArg)
+	if err != nil {
+		return client.Context{}, proposalTitle, proposalDescr, deposit, err
+	}
+
+	return clientCtx, proposalTitle, proposalDescr, deposit, nil
 }
