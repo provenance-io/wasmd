@@ -57,7 +57,6 @@ func ProposalStoreCodeCmd() *cobra.Command {
 			}
 
 			unpinCode, err := cmd.Flags().GetBool(flagUnpinCode)
-		
 			if err != nil {
 				return err
 			}
