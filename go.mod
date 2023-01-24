@@ -3,7 +3,7 @@ module github.com/CosmWasm/wasmd
 go 1.17
 
 require (
-	github.com/CosmWasm/wasmvm v1.0.0
+	github.com/CosmWasm/wasmvm v1.2.0
 	github.com/cosmos/cosmos-sdk v0.45.5
 	github.com/cosmos/iavl v0.17.3
 	github.com/cosmos/ibc-go/v3 v3.0.0
@@ -23,7 +23,7 @@ require (
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.11.0
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.1
 	github.com/syndtr/goleveldb v1.0.1-0.20200815110645-5c35d600f0ca
 	github.com/tendermint/tendermint v0.34.19
 	github.com/tendermint/tm-db v0.6.7
