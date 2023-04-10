@@ -135,6 +135,17 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 			},
 			expMsgDispatched: 1,
 		},
+		"handle multiple signers": {
+			srcRoute: capturingMessageRouter,
+			srcEncoder: func(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error) {
+				myMsg := MockMessage{
+					validateError: nil,
+					signers:       []sdk.AccAddress{myContractAddr, sdk.MustAccAddressFromBech32(RandomBech32AccountAddress(t))},
+				}
+				return []sdk.Msg{&myMsg}, nil
+			},
+			expMsgDispatched: 1,
+		},
 		"multiple output msgs": {
 			srcRoute: capturingMessageRouter,
 			srcEncoder: func(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error) {
@@ -421,4 +432,29 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 
 	// test cases:
 	// not enough money to burn
+}
+
+type MockMessage struct {
+	validateError error
+	signers       []sdk.AccAddress
+}
+
+func (msg MockMessage) GetSigners() []sdk.AccAddress {
+	return msg.signers
+}
+
+func (msg MockMessage) ValidateBasic() error {
+	return msg.validateError
+}
+
+func (msg MockMessage) Reset() {
+
+}
+
+func (msg MockMessage) String() string {
+	return ""
+}
+
+func (msg MockMessage) ProtoMessage() {
+
 }
