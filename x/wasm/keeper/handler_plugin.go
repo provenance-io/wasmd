@@ -86,10 +86,8 @@ func (h SDKMessageHandler) handleSdkMessage(ctx sdk.Context, contractAddr sdk.Ad
 		return nil, err
 	}
 	// make sure this account can send it
-	for _, acct := range msg.GetSigners() {
-		if !acct.Equals(contractAddr) {
-			return nil, sdkerrors.Wrap(sdkerrors.ErrUnauthorized, "contract doesn't have permission")
-		}
+	if len(msg.GetSigners()) == 0 || !msg.GetSigners()[0].Equals(contractAddr) {
+		return nil, sdkerrors.Wrap(sdkerrors.ErrUnauthorized, "contract doesn't have permission")
 	}
 
 	// find the handler and execute it
