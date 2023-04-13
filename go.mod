@@ -5,7 +5,7 @@ go 1.18
 require (
 	cosmossdk.io/errors v1.0.0-beta.7
 	cosmossdk.io/math v1.0.0-beta.3
-	github.com/CosmWasm/wasmvm v1.1.1
+	github.com/CosmWasm/wasmvm v1.2.1
 	github.com/cosmos/cosmos-proto v1.0.0-alpha8
 	github.com/cosmos/cosmos-sdk v0.46.7
 	github.com/cosmos/gogoproto v1.4.2
@@ -171,3 +171,6 @@ replace (
 	// the following version across all dependencies.
 	github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alpha.regen.1
 )
+
+// Needed for security issue https://github.com/CosmWasm/advisories/blob/main/CWAs/CWA-2023-001.md
+replace github.com/CosmWasm/wasmvm => github.com/CosmWasm/wasmvm v1.2.2
