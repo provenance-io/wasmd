@@ -175,3 +175,5 @@ replace (
 	// use cometbft
 	github.com/tendermint/tendermint => github.com/cometbft/cometbft v0.34.27
 )
+
+replace github.com/CosmWasm/wasmvm => github.com/CosmWasm/wasmvm v1.2.2
