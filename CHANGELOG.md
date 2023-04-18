@@ -5,7 +5,7 @@
 
 [Full Changelog](https://github.com/CosmWasm/wasmd/compare/v0.30.0...HEAD)
 
-## [v0.30.0-pio-3](https://github.com/provenance-io/wasmd/tree/notional-labs-46.7-pio-release) (2023-04-05)
+## [v0.30.0-pio-3](https://github.com/provenance-io/wasmd/tree/notional-labs-46.7-pio-release) (2023-04-18)
 
 [Full Changelog](https://github.com/notional-labs/wasmd/compare/v0.30.0-sdk46...provenance-io:wasmd:notional-labs-46.7-pio-release)
 
