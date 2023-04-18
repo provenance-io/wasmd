@@ -5,12 +5,13 @@
 
 [Full Changelog](https://github.com/CosmWasm/wasmd/compare/v0.30.0...HEAD)
 
-## [v0.30.0-pio-2](https://github.com/provenance-io/wasmd/tree/notional-labs-46.7-pio-release) (2023-04-05)
+## [v0.30.0-pio-3](https://github.com/provenance-io/wasmd/tree/notional-labs-46.7-pio-release) (2023-04-18)
 
 [Full Changelog](https://github.com/notional-labs/wasmd/compare/v0.30.0-sdk46...provenance-io:wasmd:notional-labs-46.7-pio-release)
 
 - Upgrade to IBC v6.1.0
 - Introduced partial changes from [Cosmwasm](https://github.com/CosmWasm/wasmd/pull/1269) to fix transactions ran by proposals.
+- Upgrade wasmvm to 1.1.2
 
 ## [v0.30.0](https://github.com/CosmWasm/wasmd/tree/v0.30.0) (2022-12-02)
 
