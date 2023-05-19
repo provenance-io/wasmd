@@ -139,7 +139,7 @@ func GetCmdListCode() *cobra.Command {
 		},
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "list codes")
+	flags.AddPaginationFlagsToCmd(cmd, "codes")
 	return cmd
 }
 
@@ -184,7 +184,7 @@ func GetCmdListContractByCode() *cobra.Command {
 		},
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "list contracts by code")
+	flags.AddPaginationFlagsToCmd(cmd, "contracts by code")
 	return cmd
 }
 
@@ -525,7 +525,7 @@ func GetCmdListPinnedCode() *cobra.Command {
 		},
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "list codes")
+	flags.AddPaginationFlagsToCmd(cmd, "pinned code ids")
 	return cmd
 }
 
@@ -565,6 +565,7 @@ func GetCmdListContractsByCreator() *cobra.Command {
 		},
 	}
 	flags.AddQueryFlagsToCmd(cmd)
+	flags.AddPaginationFlagsToCmd(cmd, "contracts by creator")
 	return cmd
 }
 
