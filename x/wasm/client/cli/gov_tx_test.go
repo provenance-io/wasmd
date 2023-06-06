@@ -101,7 +101,7 @@ func TestParseCodeInfoFlags(t *testing.T) {
 	correctSource := "https://github.com/CosmWasm/wasmd/blob/main/x/wasm/keeper/testdata/hackatom.wasm"
 	correctBuilderRef := "cosmwasm/workspace-optimizer:0.12.9"
 
-	wasmBin, err := os.ReadFile("../../keeper/testdata/hackatom.wasm")
+	wasmBin, err := os.ReadFile("../../keeper/testdata/hackatom.wasm.gzip")
 	require.NoError(t, err)
 
 	checksumStr := "beb3de5e9b93b52e514c74ce87ccddb594b9bcd33b7f1af1bb6da63fc883917b"
@@ -145,7 +145,7 @@ func TestParseCodeInfoFlags(t *testing.T) {
 	}
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
-			flags := ProposalStoreCodeCmd().Flags()
+			flags := ProposalStoreAndInstantiateContractCmd().Flags()
 			require.NoError(t, flags.Parse(spec.args))
 			_, _, _, gotErr := parseVerificationFlags(wasmBin, flags)
 			if spec.expErr {
