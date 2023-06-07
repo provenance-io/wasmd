@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased](https://github.com/CosmWasm/wasmd/tree/HEAD)
+## [Unreleased](https://github.com/provenance-io/wasmd/tree/main-pio)
 
 - Upgrade wasmvm to v1.2.4 [/#80](https://github.com/provenance-io/wasmd/pull/80)
 
