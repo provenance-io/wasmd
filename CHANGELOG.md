@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.30.0-pio-6](https://github.com/provenance-io/wasmd/releases/tag/v0.30.0-pio-6) (2023-01-10)
+
+- Upgrade wasmvm to v1.2.6 [#1799](https://github.com/provenance-io/provenance/issues/1799)
+
+[Diff From v0.30.0](https://github.com/provenance-io/wasmd/compare/v0.30.0...v0.30.0-pio-6)
+[Diff From v0.30.0-pio-5](https://github.com/provenance-io/wasmd/compare/v0.30.0-pio-5...v0.30.0-pio-6)
+
 ## [v0.30.0-pio-5](https://github.com/provenance-io/wasmd/releases/tag/v0.30.0-pio-5) (2023-06-09)
 
 - Upgrade wasmvm to v1.2.4 [#80](https://github.com/provenance-io/wasmd/pull/80)
