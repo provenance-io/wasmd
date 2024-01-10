@@ -1,10 +1,11 @@
 # Changelog
 
-## [Unreleased](https://github.com/provenance-io/wasmd/tree/main-pio)
+## [v0.30.0-pio-5](https://github.com/provenance-io/wasmd/releases/tag/v0.30.0-pio-5) (2023-06-09)
 
-- Upgrade wasmvm to v1.2.4 [/#80](https://github.com/provenance-io/wasmd/pull/80)
+- Upgrade wasmvm to v1.2.4 [#80](https://github.com/provenance-io/wasmd/pull/80)
 
-[Full Changelog](https://github.com/CosmWasm/wasmd/compare/v0.30.0...HEAD)
+[Diff From v0.30.0](https://github.com/provenance-io/wasmd/compare/v0.30.0...v0.30.0-pio-5)
+[Diff From v0.30.0-pio-3](https://github.com/provenance-io/wasmd/compare/v0.30.0-pio-3...v0.30.0-pio-5)
 
 ## [v0.30.0-pio-3](https://github.com/provenance-io/wasmd/tree/notional-labs-46.7-pio-release) (2023-04-18)
 
