@@ -6,8 +6,8 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/store"
 
+	dbm "github.com/cometbft/cometbft-db"
 	channeltypes "github.com/cosmos/ibc-go/v6/modules/core/04-channel/types"
-	dbm "github.com/tendermint/tm-db"
 
 	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
