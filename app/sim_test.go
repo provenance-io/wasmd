@@ -118,7 +118,7 @@ func TestAppImportExport(t *testing.T) {
 	require.Equal(t, appName, app.Name())
 
 	// Run randomized simulation
-	_, simParams, simErr := simulation.SimulateFromSeed(
+	_, _, simParams, simErr := simulation.SimulateFromSeed(
 		t,
 		os.Stdout,
 		app.BaseApp,
@@ -224,7 +224,7 @@ func TestFullAppSimulation(t *testing.T) {
 	require.Equal(t, "WasmApp", app.Name())
 
 	// run randomized simulation
-	_, simParams, simErr := simulation.SimulateFromSeed(
+	_, _, simParams, simErr := simulation.SimulateFromSeed(
 		t,
 		os.Stdout,
 		app.BaseApp,
