@@ -168,10 +168,9 @@ require (
 
 replace (
 	// Needed for the IAVL bump.
-	// github.com/cosmos/cosmos-sdk => github.com/provenance-io/cosmos-sdk v0.46.13-pio-3
-	github.com/cosmos/cosmos-sdk => ../prov-cosmos-sdk
+	github.com/cosmos/cosmos-sdk => github.com/provenance-io/cosmos-sdk v0.46.13-pio-4
 	// This is needed for the IAVL bump too.
-	github.com/cosmos/ibc-go/v6 => ../ibc-go
+	github.com/cosmos/ibc-go/v6 => github.com/provenance-io/ibc-go/v6 v6.2.0-pio-2
 	// Fix upstream GHSA-h395-qcrw-5vmq vulnerability.
 	// TODO Remove it: https://github.com/cosmos/cosmos-sdk/issues/10409
 	github.com/gin-gonic/gin => github.com/gin-gonic/gin v1.8.1
