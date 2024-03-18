@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	db "github.com/cometbft/cometbft-db"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -18,7 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tendermint/tendermint/libs/log"
 	tmtypes "github.com/tendermint/tendermint/types"
-	db "github.com/tendermint/tm-db"
 
 	abci "github.com/tendermint/tendermint/abci/types"
 
@@ -190,7 +190,7 @@ func SetupGenesisValSet(t *testing.T, valSet *tmtypes.ValidatorSet, genAccs []au
 	})
 
 	// update total supply
-	bankGenesis := banktypes.NewGenesisState(banktypes.DefaultGenesisState().Params, balances, totalSupply, []banktypes.Metadata{})
+	bankGenesis := banktypes.NewGenesisState(banktypes.DefaultGenesisState().Params, balances, totalSupply, []banktypes.Metadata{}, nil)
 	genesisState[banktypes.ModuleName] = app.appCodec.MustMarshalJSON(bankGenesis)
 
 	return genesisState
