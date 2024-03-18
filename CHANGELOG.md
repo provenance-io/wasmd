@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.30.0-pio-7](https://github.com/provenance-io/wasmd/releases/tag/v0.30.0-pio-7) (2024-03-18)
+
+- Upgrade iavl to v0.20.1 [#82](https://github.com/provenance-io/wasmd/pull/82)
+- Upgrade cosmos-sdk to v0.46.13-pio-4 [#82](https://github.com/provenance-io/wasmd/pull/82)
+
+[Diff From v0.30.0](https://github.com/provenance-io/wasmd/compare/v0.30.0...v0.30.0-pio-7)
+[Diff From v0.30.0-pio-6](https://github.com/provenance-io/wasmd/compare/v0.30.0-pio-6...v0.30.0-pio-7)
+
 ## [v0.30.0-pio-6](https://github.com/provenance-io/wasmd/releases/tag/v0.30.0-pio-6) (2023-01-10)
 
 - Upgrade wasmvm to v1.2.6 [#1799](https://github.com/provenance-io/provenance/issues/1799)
