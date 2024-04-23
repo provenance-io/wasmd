@@ -104,10 +104,8 @@ func (h SDKMessageHandler) handleSdkMessage(ctx sdk.Context, contractAddr sdk.Ad
 	if err != nil {
 		return nil, err
 	}
-	for _, acct := range signers {
-		if !contractAddr.Equals(sdk.AccAddress(acct)) {
-			return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "contract doesn't have permission")
-		}
+	if len(signers) == 0 || !sdk.AccAddress(signers[0]).Equals(contractAddr) {
+		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "contract doesn't have permission")
 	}
 	// --- end block
 
