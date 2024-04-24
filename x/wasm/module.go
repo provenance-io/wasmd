@@ -15,7 +15,6 @@ import (
 
 	"cosmossdk.io/core/appmodule"
 
-	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	cdctypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -120,7 +119,7 @@ func NewAppModule(
 	validatorSetSource keeper.ValidatorSetSource,
 	ak types.AccountKeeper,
 	bk simulation.BankKeeper,
-	router *baseapp.MsgServiceRouter,
+	router keeper.MessageRouter,
 	ss exported.Subspace,
 ) AppModule {
 	return AppModule{
