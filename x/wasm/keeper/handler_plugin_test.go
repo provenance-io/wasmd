@@ -13,12 +13,14 @@ import (
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	protov2 "google.golang.org/protobuf/proto"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log"
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
@@ -130,6 +132,7 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 		srcEncoder       CustomEncoder
 		expErr           *errorsmod.Error
 		expMsgDispatched int
+		cdc              *MockCodec
 	}{
 		"all good": {
 			srcRoute: capturingMessageRouter,
@@ -142,6 +145,18 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 				return []sdk.Msg{&myMsg}, nil
 			},
 			expMsgDispatched: 1,
+		},
+		"handle multiple signers": {
+			srcRoute: capturingMessageRouter,
+			srcEncoder: func(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error) {
+				myMsg := MockMessage{
+					validateError: nil,
+					signers:       []sdk.AccAddress{myContractAddr, sdk.MustAccAddressFromBech32(RandomBech32AccountAddress(t))},
+				}
+				return []sdk.Msg{&myMsg}, nil
+			},
+			expMsgDispatched: 1,
+			cdc:              &MockCodec{},
 		},
 		"multiple output msgs": {
 			srcRoute: capturingMessageRouter,
@@ -211,7 +226,11 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 
 			// when
 			ctx := sdk.Context{}
-			h := NewSDKMessageHandler(MakeTestCodec(t), spec.srcRoute, MessageEncoders{Custom: spec.srcEncoder})
+			cdc := MakeTestCodec(t)
+			if spec.cdc != nil {
+				cdc = spec.cdc.WithCodec(cdc)
+			}
+			h := NewSDKMessageHandler(cdc, spec.srcRoute, MessageEncoders{Custom: spec.srcEncoder})
 			gotEvents, gotData, gotMsgResponses, gotErr := h.DispatchMsg(ctx, myContractAddr, "myPort", myContractMessage)
 
 			// then
@@ -487,4 +506,50 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 
 	// test cases:
 	// not enough money to burn
+}
+
+type MockMessage struct {
+	validateError error
+	signers       []sdk.AccAddress
+}
+
+func (msg MockMessage) GetSigners() []sdk.AccAddress {
+	return msg.signers
+}
+
+func (msg MockMessage) ValidateBasic() error {
+	return msg.validateError
+}
+
+func (msg MockMessage) Reset() {
+}
+
+func (msg MockMessage) String() string {
+	return ""
+}
+
+func (msg MockMessage) ProtoMessage() {
+}
+
+type MockCodec struct {
+	codec.Codec
+}
+
+func (cdc *MockCodec) GetMsgV1Signers(msg proto.Message) ([][]byte, protov2.Message, error) {
+	mock, ok := msg.(*MockMessage)
+	if !ok {
+		return cdc.Codec.GetMsgV1Signers(msg)
+	}
+
+	signers := mock.GetSigners()
+	bytes := make([][]byte, 0, len(signers))
+	for _, signer := range signers {
+		bytes = append(bytes, signer.Bytes())
+	}
+	return bytes, nil, nil
+}
+
+func (cdc *MockCodec) WithCodec(codec codec.Codec) *MockCodec {
+	cdc.Codec = codec
+	return cdc
 }
