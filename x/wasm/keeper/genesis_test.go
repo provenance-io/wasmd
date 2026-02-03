@@ -9,30 +9,31 @@ import (
 	"testing"
 	"time"
 
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
 	abci "github.com/cometbft/cometbft/abci/types"
-
-	"github.com/cosmos/cosmos-sdk/baseapp"
-	storetypes "github.com/cosmos/cosmos-sdk/store/types"
-	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	"github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
-
-	dbm "github.com/cometbft/cometbft-db"
-	"github.com/cometbft/cometbft/libs/log"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	"github.com/cosmos/cosmos-sdk/store"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
-	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
-	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	dbm "github.com/cosmos/cosmos-db"
 	fuzz "github.com/google/gofuzz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/log"
+	"cosmossdk.io/store"
+	storemetrics "cosmossdk.io/store/metrics"
+	storetypes "cosmossdk.io/store/types"
+
+	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/runtime"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	"github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
+	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
+
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
-
-const firstCodeID = 1
 
 func TestGenesisExportImport(t *testing.T) {
 	wasmKeeper, srcCtx := setupKeeper(t)
@@ -83,8 +84,8 @@ func TestGenesisExportImport(t *testing.T) {
 
 		contract.CodeID = codeID
 		contractAddr := wasmKeeper.ClassicAddressGenerator()(srcCtx, codeID, nil)
-		wasmKeeper.storeContractInfo(srcCtx, contractAddr, &contract)
-		wasmKeeper.appendToContractHistory(srcCtx, contractAddr, history...)
+		wasmKeeper.mustStoreContractInfo(srcCtx, contractAddr, &contract)
+		require.NoError(t, wasmKeeper.appendToContractHistory(srcCtx, contractAddr, history...))
 		err = wasmKeeper.importContractState(srcCtx, contractAddr, stateModels)
 		require.NoError(t, err)
 	}
@@ -116,10 +117,15 @@ func TestGenesisExportImport(t *testing.T) {
 		creatorAddress := sdk.MustAccAddressFromBech32(info.Creator)
 		history := wasmKeeper.GetContractHistory(srcCtx, address)
 
-		wasmKeeper.addToContractCodeSecondaryIndex(srcCtx, address, history[len(history)-1])
-		wasmKeeper.addToContractCreatorSecondaryIndex(srcCtx, creatorAddress, history[0].Updated, address)
+		err = wasmKeeper.addToContractCodeSecondaryIndex(srcCtx, address, history[len(history)-1])
+		require.NoError(t, err)
+		err = wasmKeeper.addToContractCreatorSecondaryIndex(srcCtx, creatorAddress, history[0].Updated, address)
+		require.NoError(t, err)
 		return false
 	})
+
+	originalMaxWasmSize := types.MaxWasmSize
+	types.MaxWasmSize = 1
 
 	// re-import
 	var importState types.GenesisState
@@ -130,21 +136,41 @@ func TestGenesisExportImport(t *testing.T) {
 
 	// compare whole DB
 
-	srcIT := srcCtx.KVStore(wasmKeeper.storeKey).Iterator(nil, nil)
-	dstIT := dstCtx.KVStore(dstKeeper.storeKey).Iterator(nil, nil)
+	srcIT, err := wasmKeeper.storeService.OpenKVStore(srcCtx).Iterator(nil, nil)
+	require.NoError(t, err)
+	dstIT, err := dstKeeper.storeService.OpenKVStore(dstCtx).Iterator(nil, nil)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		types.MaxWasmSize = originalMaxWasmSize
+		srcIT.Close()
+		dstIT.Close()
+	})
 
 	for i := 0; srcIT.Valid(); i++ {
-		require.True(t, dstIT.Valid(), "[%s] destination DB has less elements than source. Missing: %x", wasmKeeper.storeKey.Name(), srcIT.Key())
+		require.True(t, dstIT.Valid(), "[%s] destination DB has less elements than source. Missing", srcIT.Key())
 		require.Equal(t, srcIT.Key(), dstIT.Key(), i)
-		require.Equal(t, srcIT.Value(), dstIT.Value(), "[%s] element (%d): %X", wasmKeeper.storeKey.Name(), i, srcIT.Key())
+		require.Equal(t, srcIT.Value(), dstIT.Value(), "[%s] element: %X", i, srcIT.Key())
 		dstIT.Next()
 		srcIT.Next()
 	}
 	if !assert.False(t, dstIT.Valid()) {
 		t.Fatalf("dest Iterator still has key :%X", dstIT.Key())
 	}
-	srcIT.Close()
-	dstIT.Close()
+}
+
+func TestGenesisExportImportWithPredictableAddress(t *testing.T) {
+	ctx, keepers := CreateTestInput(t, false, AvailableCapabilities)
+	k := keepers.WasmKeeper
+	eCtx, _ := ctx.CacheContext()
+	codeID := StoreReflectContract(t, eCtx, keepers).CodeID
+	creator := RandomAccountAddress(t)
+	_, _, err := keepers.ContractKeeper.Instantiate2(eCtx, codeID, creator, nil, []byte("{}"), "testing", nil, []byte("my_salt"), false)
+	require.NoError(t, err)
+	genesisState := ExportGenesis(eCtx, k)
+	// when imported
+	_, err = InitGenesis(ctx, k, *genesisState)
+	require.NoError(t, err)
 }
 
 func TestGenesisInit(t *testing.T) {
@@ -159,13 +185,13 @@ func TestGenesisInit(t *testing.T) {
 		"happy path: code info correct": {
 			src: types.GenesisState{
 				Codes: []types.Code{{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}},
 				Sequences: []types.Sequence{
-					{IDKey: types.KeyLastCodeID, Value: 2},
-					{IDKey: types.KeyLastInstanceID, Value: 1},
+					{IDKey: types.KeySequenceCodeID, Value: 2},
+					{IDKey: types.KeySequenceInstanceID, Value: 1},
 				},
 				Params: types.DefaultParams(),
 			},
@@ -174,7 +200,7 @@ func TestGenesisInit(t *testing.T) {
 		"happy path: code ids can contain gaps": {
 			src: types.GenesisState{
 				Codes: []types.Code{{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}, {
@@ -183,8 +209,8 @@ func TestGenesisInit(t *testing.T) {
 					CodeBytes: wasmCode,
 				}},
 				Sequences: []types.Sequence{
-					{IDKey: types.KeyLastCodeID, Value: 10},
-					{IDKey: types.KeyLastInstanceID, Value: 1},
+					{IDKey: types.KeySequenceCodeID, Value: 10},
+					{IDKey: types.KeySequenceInstanceID, Value: 1},
 				},
 				Params: types.DefaultParams(),
 			},
@@ -197,14 +223,14 @@ func TestGenesisInit(t *testing.T) {
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}, {
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}},
 				Contracts: nil,
 				Sequences: []types.Sequence{
-					{IDKey: types.KeyLastCodeID, Value: 3},
-					{IDKey: types.KeyLastInstanceID, Value: 1},
+					{IDKey: types.KeySequenceCodeID, Value: 3},
+					{IDKey: types.KeySequenceInstanceID, Value: 1},
 				},
 				Params: types.DefaultParams(),
 			},
@@ -212,7 +238,7 @@ func TestGenesisInit(t *testing.T) {
 		},
 		"prevent code hash mismatch": {src: types.GenesisState{
 			Codes: []types.Code{{
-				CodeID:    firstCodeID,
+				CodeID:    1,
 				CodeInfo:  types.CodeInfoFixture(func(i *types.CodeInfo) { i.CodeHash = make([]byte, sha256.Size) }),
 				CodeBytes: wasmCode,
 			}},
@@ -221,12 +247,12 @@ func TestGenesisInit(t *testing.T) {
 		"prevent duplicate codeIDs": {src: types.GenesisState{
 			Codes: []types.Code{
 				{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				},
 				{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				},
@@ -237,7 +263,7 @@ func TestGenesisInit(t *testing.T) {
 			src: types.GenesisState{
 				Codes: []types.Code{
 					{
-						CodeID:    firstCodeID,
+						CodeID:    1,
 						CodeInfo:  myCodeInfo,
 						CodeBytes: wasmCode,
 						Pinned:    true,
@@ -255,7 +281,7 @@ func TestGenesisInit(t *testing.T) {
 		"happy path: code id in info and contract do match": {
 			src: types.GenesisState{
 				Codes: []types.Code{{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}},
@@ -274,8 +300,8 @@ func TestGenesisInit(t *testing.T) {
 					},
 				},
 				Sequences: []types.Sequence{
-					{IDKey: types.KeyLastCodeID, Value: 2},
-					{IDKey: types.KeyLastInstanceID, Value: 2},
+					{IDKey: types.KeySequenceCodeID, Value: 2},
+					{IDKey: types.KeySequenceInstanceID, Value: 2},
 				},
 				Params: types.DefaultParams(),
 			},
@@ -284,7 +310,7 @@ func TestGenesisInit(t *testing.T) {
 		"happy path: code info with two contracts": {
 			src: types.GenesisState{
 				Codes: []types.Code{{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}},
@@ -314,8 +340,8 @@ func TestGenesisInit(t *testing.T) {
 					},
 				},
 				Sequences: []types.Sequence{
-					{IDKey: types.KeyLastCodeID, Value: 2},
-					{IDKey: types.KeyLastInstanceID, Value: 3},
+					{IDKey: types.KeySequenceCodeID, Value: 2},
+					{IDKey: types.KeySequenceInstanceID, Value: 3},
 				},
 				Params: types.DefaultParams(),
 			},
@@ -343,7 +369,7 @@ func TestGenesisInit(t *testing.T) {
 		"prevent duplicate contract address": {
 			src: types.GenesisState{
 				Codes: []types.Code{{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}},
@@ -378,7 +404,7 @@ func TestGenesisInit(t *testing.T) {
 		"prevent duplicate contract model keys": {
 			src: types.GenesisState{
 				Codes: []types.Code{{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}},
@@ -426,15 +452,15 @@ func TestGenesisInit(t *testing.T) {
 					CodeBytes: wasmCode,
 				}},
 				Sequences: []types.Sequence{
-					{IDKey: types.KeyLastCodeID, Value: 1},
+					{IDKey: types.KeySequenceCodeID, Value: 1},
 				},
 				Params: types.DefaultParams(),
 			},
 		},
-		"prevent contract id seq init value == count contracts": {
+		"prevent contract id seq init value not high enough": {
 			src: types.GenesisState{
 				Codes: []types.Code{{
-					CodeID:    firstCodeID,
+					CodeID:    1,
 					CodeInfo:  myCodeInfo,
 					CodeBytes: wasmCode,
 				}},
@@ -453,8 +479,8 @@ func TestGenesisInit(t *testing.T) {
 					},
 				},
 				Sequences: []types.Sequence{
-					{IDKey: types.KeyLastCodeID, Value: 2},
-					{IDKey: types.KeyLastInstanceID, Value: 1},
+					{IDKey: types.KeySequenceCodeID, Value: 2},
+					{IDKey: types.KeySequenceInstanceID, Value: 1},
 				},
 				Params: types.DefaultParams(),
 			},
@@ -547,7 +573,8 @@ func TestImportContractWithCodeHistoryPreserved(t *testing.T) {
 	wasmCode, err := os.ReadFile("./testdata/hackatom.wasm")
 	require.NoError(t, err)
 
-	wasmCodeHash := sha256.Sum256(wasmCode)
+	wasmCodeHash, err := wasmvm.CreateChecksum(wasmCode)
+	require.NoError(t, err)
 	enc64 := base64.StdEncoding.EncodeToString
 	genesisStr := fmt.Sprintf(genesisTemplate, enc64(wasmCodeHash[:]), enc64(wasmCode))
 
@@ -556,7 +583,7 @@ func TestImportContractWithCodeHistoryPreserved(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, importState.ValidateBasic(), genesisStr)
 
-	ctx = ctx.WithBlockHeight(0).WithGasMeter(sdk.NewInfiniteGasMeter())
+	ctx = ctx.WithBlockHeight(0).WithGasMeter(storetypes.NewInfiniteGasMeter())
 
 	// when
 	_, err = InitGenesis(ctx, keeper, importState)
@@ -589,7 +616,7 @@ func TestImportContractWithCodeHistoryPreserved(t *testing.T) {
 	adminAddr := "cosmos1h5t8zxmjr30e9dqghtlpl40f2zz5cgey6esxtn"
 
 	expContractInfo := types.ContractInfo{
-		CodeID:  firstCodeID,
+		CodeID:  1,
 		Creator: contractCreatorAddr,
 		Admin:   adminAddr,
 		Label:   "ȀĴnZV芢毤",
@@ -600,7 +627,7 @@ func TestImportContractWithCodeHistoryPreserved(t *testing.T) {
 	expHistory := []types.ContractCodeHistoryEntry{
 		{
 			Operation: types.ContractCodeHistoryOperationTypeInit,
-			CodeID:    firstCodeID,
+			CodeID:    1,
 			Updated: &types.AbsoluteTxPosition{
 				BlockHeight: 100,
 				TxIndex:     10,
@@ -609,7 +636,7 @@ func TestImportContractWithCodeHistoryPreserved(t *testing.T) {
 		},
 		{
 			Operation: types.ContractCodeHistoryOperationTypeMigrate,
-			CodeID:    firstCodeID,
+			CodeID:    1,
 			Updated: &types.AbsoluteTxPosition{
 				BlockHeight: 200,
 				TxIndex:     10,
@@ -618,24 +645,26 @@ func TestImportContractWithCodeHistoryPreserved(t *testing.T) {
 		},
 	}
 	assert.Equal(t, expHistory, keeper.GetContractHistory(ctx, contractAddr))
-	assert.Equal(t, uint64(2), keeper.PeekAutoIncrementID(ctx, types.KeyLastCodeID))
-	assert.Equal(t, uint64(3), keeper.PeekAutoIncrementID(ctx, types.KeyLastInstanceID))
+	id, err := keeper.PeekAutoIncrementID(ctx, types.KeySequenceCodeID)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), id)
+	id, err = keeper.PeekAutoIncrementID(ctx, types.KeySequenceInstanceID)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(3), id)
 }
 
 func setupKeeper(t *testing.T) (*Keeper, sdk.Context) {
 	t.Helper()
-	tempDir, err := os.MkdirTemp("", "wasm")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(tempDir) })
+	tempDir := t.TempDir()
 
-	keyWasm := sdk.NewKVStoreKey(types.StoreKey)
+	keyWasm := storetypes.NewKVStoreKey(types.StoreKey)
 
 	db := dbm.NewMemDB()
-	ms := store.NewCommitMultiStore(db)
+	ms := store.NewCommitMultiStore(db, log.NewTestLogger(t), storemetrics.NewNoOpMetrics())
 	ms.MountStoreWithDB(keyWasm, storetypes.StoreTypeIAVL, db)
 	require.NoError(t, ms.LoadLatestVersion())
 
-	ctx := sdk.NewContext(ms, tmproto.Header{
+	ctx := sdk.NewContext(ms, cmtproto.Header{
 		Height: 1234567,
 		Time:   time.Date(2020, time.April, 22, 12, 0, 0, 0, time.UTC),
 	}, false, log.NewNopLogger())
@@ -649,11 +678,11 @@ func setupKeeper(t *testing.T) (*Keeper, sdk.Context) {
 	// also registering gov interfaces for nested Any type
 	v1beta1.RegisterInterfaces(encodingConfig.InterfaceRegistry)
 
-	wasmConfig := types.DefaultWasmConfig()
+	nodeConfig := types.DefaultNodeConfig()
 
 	srcKeeper := NewKeeper(
-		encodingConfig.Marshaler,
-		keyWasm,
+		encodingConfig.Codec,
+		runtime.NewKVStoreService(keyWasm),
 		authkeeper.AccountKeeper{},
 		&bankkeeper.BaseKeeper{},
 		stakingkeeper.Keeper{},
@@ -664,9 +693,9 @@ func setupKeeper(t *testing.T) (*Keeper, sdk.Context) {
 		nil,
 		nil,
 		nil,
-		nil,
 		tempDir,
-		wasmConfig,
+		nodeConfig,
+		types.VMConfig{},
 		AvailableCapabilities,
 		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)

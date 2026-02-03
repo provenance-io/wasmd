@@ -3,12 +3,17 @@ package testdata
 import (
 	_ "embed"
 
-	typwasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	typwasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+
 	"github.com/cosmos/cosmos-sdk/types"
 )
 
+const (
+	ChecksumHackatom = "3f4cd47c39c57fe1733fb41ed176eebd9d5c67baf5df8a1eeda1455e758f8514"
+)
+
 var (
-	//go:embed reflect.wasm
+	//go:embed reflect_2_0.wasm
 	reflectContract []byte
 	//go:embed reflect_1_1.wasm
 	migrateReflectContract []byte

@@ -5,15 +5,21 @@ import (
 	"testing"
 	"time"
 
+	abci "github.com/cometbft/cometbft/abci/types"
+	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/gogoproto/proto"
 	"github.com/stretchr/testify/require"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 
-	dbm "github.com/cometbft/cometbft-db"
-	abci "github.com/cometbft/cometbft/abci/types"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"cosmossdk.io/x/tx/signing"
 
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/codec/address"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
+	"github.com/cosmos/cosmos-sdk/std"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/authz"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
@@ -97,29 +103,99 @@ func BenchmarkTxSending(b *testing.B) {
 
 			// number of Tx per block for the benchmarks
 			blockSize := tc.blockSize
-			height := int64(3)
+			height := int64(2)
 			txEncoder := appInfo.TxConfig.TxEncoder()
 
 			b.ResetTimer()
 
 			for i := 0; i < b.N/blockSize; i++ {
-				appInfo.App.BeginBlock(abci.RequestBeginBlock{Header: tmproto.Header{Height: height, Time: time.Now()}})
-
+				xxx := make([][]byte, blockSize)
 				for j := 0; j < blockSize; j++ {
 					idx := i*blockSize + j
 					bz, err := txEncoder(txs[idx])
 					require.NoError(b, err)
-					rsp := appInfo.App.CheckTx(abci.RequestCheckTx{
-						Tx:   bz,
-						Type: abci.CheckTxType_New,
-					})
-					require.True(b, rsp.IsOK())
-					dRsp := appInfo.App.DeliverTx(abci.RequestDeliverTx{Tx: bz})
-					require.True(b, dRsp.IsOK())
+					xxx[j] = bz
 				}
-				appInfo.App.EndBlock(abci.RequestEndBlock{Height: height})
-				appInfo.App.Commit()
+				_, err := appInfo.App.FinalizeBlock(&abci.RequestFinalizeBlock{Txs: xxx, Height: height, Time: time.Now()})
+				require.NoError(b, err)
+
+				_, err = appInfo.App.Commit()
+				require.NoError(b, err)
 				height++
+			}
+		})
+	}
+}
+
+func BenchmarkUnpackAny(b *testing.B) {
+	interfaceRegistry, err := codectypes.NewInterfaceRegistryWithOptions(codectypes.InterfaceRegistryOptions{
+		ProtoFiles: proto.HybridResolver,
+		SigningOptions: signing.Options{
+			AddressCodec: address.Bech32Codec{
+				Bech32Prefix: sdk.GetConfig().GetBech32AccountAddrPrefix(),
+			},
+			ValidatorAddressCodec: address.Bech32Codec{
+				Bech32Prefix: sdk.GetConfig().GetBech32ValidatorAddrPrefix(),
+			},
+		},
+	})
+	require.NoError(b, err)
+
+	cdc := codec.NewProtoCodec(interfaceRegistry)
+	std.RegisterInterfaces(interfaceRegistry)
+
+	mustCreateAny := func(b *testing.B, v proto.Message) *codectypes.Any {
+		b.Helper()
+		any, err := codectypes.NewAnyWithValue(v)
+		require.NoError(b, err)
+		return any
+	}
+
+	createNested := func(b *testing.B, depth int) *codectypes.Any {
+		b.Helper()
+		// create nested MsgExecs
+		nested := authz.NewMsgExec(sdk.AccAddress{}, []sdk.Msg{})
+		for i := 0; i < depth; i++ {
+			nested = authz.NewMsgExec(sdk.AccAddress{}, []sdk.Msg{&nested})
+		}
+
+		return mustCreateAny(b, &nested)
+	}
+
+	cases := map[string]struct {
+		msg    *codectypes.Any
+		expErr bool
+	}{
+		"garbage any": {
+			msg: &codectypes.Any{
+				TypeUrl: "aslasdf",
+				Value:   []byte("oiuwurjtlwerlwmt032498u50j3oehr943q;l348u58q=-afvu89 290i32-1[1]"),
+			},
+			expErr: true,
+		},
+		"single MsgExec": {
+			msg: createNested(b, 1),
+		},
+		"10000 MsgExec": {
+			msg: createNested(b, 10000),
+		},
+		"100000 MsgExec": {
+			msg: createNested(b, 100000),
+		},
+	}
+
+	for name, tc := range cases {
+		b.Run(name, func(b *testing.B) {
+			b.Logf("%s msg size %v", name, len(tc.msg.Value))
+			b.ResetTimer()
+			for b.Loop() {
+				var msg sdk.Msg
+				err := cdc.UnpackAny(tc.msg, &msg)
+				if tc.expErr {
+					require.Error(b, err)
+				} else {
+					require.NoError(b, err)
+				}
 			}
 		})
 	}

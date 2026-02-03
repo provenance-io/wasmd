@@ -2,11 +2,13 @@ package cli
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
@@ -104,7 +106,7 @@ func TestParseCodeInfoFlags(t *testing.T) {
 	wasmBin, err := os.ReadFile("../../keeper/testdata/hackatom.wasm.gzip")
 	require.NoError(t, err)
 
-	checksumStr := "beb3de5e9b93b52e514c74ce87ccddb594b9bcd33b7f1af1bb6da63fc883917b"
+	checksumStr := strings.ToUpper(testdata.ChecksumHackatom)
 
 	specs := map[string]struct {
 		args   []string

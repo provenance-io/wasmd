@@ -5,31 +5,33 @@ import (
 	"os"
 	"testing"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	sdkmath "cosmossdk.io/math"
+
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	distributionkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
-	"github.com/cosmos/cosmos-sdk/x/staking"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
 type StakingInitMsg struct {
-	Name      string         `json:"name"`
-	Symbol    string         `json:"symbol"`
-	Decimals  uint8          `json:"decimals"`
-	Validator sdk.ValAddress `json:"validator"`
-	ExitTax   sdk.Dec        `json:"exit_tax"`
+	Name      string            `json:"name"`
+	Symbol    string            `json:"symbol"`
+	Decimals  uint8             `json:"decimals"`
+	Validator sdk.ValAddress    `json:"validator"`
+	ExitTax   sdkmath.LegacyDec `json:"exit_tax"`
 	// MinWithdrawal is uint128 encoded as a string (use math.Int?)
-	MinWithdrawl string `json:"min_withdrawal"`
+	MinWithdrawal string `json:"min_withdrawal"`
 }
 
 // StakingHandleMsg is used to encode handle messages
@@ -80,14 +82,14 @@ type TokenInfoResponse struct {
 }
 
 type InvestmentResponse struct {
-	TokenSupply  string         `json:"token_supply"`
-	StakedTokens sdk.Coin       `json:"staked_tokens"`
-	NominalValue sdk.Dec        `json:"nominal_value"`
-	Owner        sdk.AccAddress `json:"owner"`
-	Validator    sdk.ValAddress `json:"validator"`
-	ExitTax      sdk.Dec        `json:"exit_tax"`
-	// MinWithdrawl is uint128 encoded as a string (use math.Int?)
-	MinWithdrawl string `json:"min_withdrawal"`
+	TokenSupply  string            `json:"token_supply"`
+	StakedTokens sdk.Coin          `json:"staked_tokens"`
+	NominalValue sdkmath.LegacyDec `json:"nominal_value"`
+	Owner        sdk.AccAddress    `json:"owner"`
+	Validator    sdk.ValAddress    `json:"validator"`
+	ExitTax      sdkmath.LegacyDec `json:"exit_tax"`
+	// MinWithdrawal is uint128 encoded as a string (use math.Int?)
+	MinWithdrawal string `json:"min_withdrawal"`
 }
 
 func TestInitializeStaking(t *testing.T) {
@@ -96,14 +98,14 @@ func TestInitializeStaking(t *testing.T) {
 
 	valAddr := addValidator(t, ctx, stakingKeeper, k.Faucet, sdk.NewInt64Coin("stake", 1234567))
 	ctx = nextBlock(ctx, stakingKeeper)
-	v, found := stakingKeeper.GetValidator(ctx, valAddr)
-	assert.True(t, found)
-	assert.Equal(t, v.GetDelegatorShares(), sdk.NewDec(1234567))
+	v, err := stakingKeeper.GetValidator(ctx, valAddr)
+	require.NoError(t, err)
+	assert.Equal(t, v.GetDelegatorShares(), sdkmath.LegacyNewDec(1234567))
 
 	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000), sdk.NewInt64Coin("stake", 500000))
 	creator := k.Faucet.NewFundedRandomAccount(ctx, deposit...)
 
-	// upload staking derivates code
+	// upload staking derivative code
 	stakingCode, err := os.ReadFile("./testdata/staking.wasm")
 	require.NoError(t, err)
 	stakingID, _, err := keeper.Create(ctx, creator, stakingCode, nil)
@@ -112,17 +114,17 @@ func TestInitializeStaking(t *testing.T) {
 
 	// register to a valid address
 	initMsg := StakingInitMsg{
-		Name:         "Staking Derivatives",
-		Symbol:       "DRV",
-		Decimals:     0,
-		Validator:    valAddr,
-		ExitTax:      sdk.MustNewDecFromStr("0.10"),
-		MinWithdrawl: "100",
+		Name:          "Staking Derivatives",
+		Symbol:        "DRV",
+		Decimals:      0,
+		Validator:     valAddr,
+		ExitTax:       sdkmath.LegacyMustNewDecFromStr("0.10"),
+		MinWithdrawal: "100",
 	}
 	initBz, err := json.Marshal(&initMsg)
 	require.NoError(t, err)
 
-	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivates - DRV", nil)
+	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivative - DRV", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, stakingAddr)
 
@@ -132,12 +134,12 @@ func TestInitializeStaking(t *testing.T) {
 	// try to register with a validator not on the list and it fails
 	_, bob := keyPubAddr()
 	badInitMsg := StakingInitMsg{
-		Name:         "Missing Validator",
-		Symbol:       "MISS",
-		Decimals:     0,
-		Validator:    sdk.ValAddress(bob),
-		ExitTax:      sdk.MustNewDecFromStr("0.10"),
-		MinWithdrawl: "100",
+		Name:          "Missing Validator",
+		Symbol:        "MISS",
+		Decimals:      0,
+		Validator:     sdk.ValAddress(bob),
+		ExitTax:       sdkmath.LegacyMustNewDecFromStr("0.10"),
+		MinWithdrawal: "100",
 	}
 	badBz, err := json.Marshal(&badInitMsg)
 	require.NoError(t, err)
@@ -147,7 +149,7 @@ func TestInitializeStaking(t *testing.T) {
 
 	// no changes to bonding shares
 	val, _ := stakingKeeper.GetValidator(ctx, valAddr)
-	assert.Equal(t, val.GetDelegatorShares(), sdk.NewDec(1234567))
+	assert.Equal(t, val.GetDelegatorShares(), sdkmath.LegacyNewDec(1234567))
 }
 
 type initInfo struct {
@@ -172,15 +174,15 @@ func initializeStaking(t *testing.T) initInfo {
 	valAddr := addValidator(t, ctx, stakingKeeper, k.Faucet, sdk.NewInt64Coin("stake", 1000000))
 	ctx = nextBlock(ctx, stakingKeeper)
 
-	v, found := stakingKeeper.GetValidator(ctx, valAddr)
-	assert.True(t, found)
-	assert.Equal(t, v.GetDelegatorShares(), sdk.NewDec(1000000))
+	v, err := stakingKeeper.GetValidator(ctx, valAddr)
+	require.NoError(t, err)
+	assert.Equal(t, v.GetDelegatorShares(), sdkmath.LegacyNewDec(1000000))
 	assert.Equal(t, v.Status, stakingtypes.Bonded)
 
 	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000), sdk.NewInt64Coin("stake", 500000))
 	creator := k.Faucet.NewFundedRandomAccount(ctx, deposit...)
 
-	// upload staking derivates code
+	// upload staking derivative code
 	stakingCode, err := os.ReadFile("./testdata/staking.wasm")
 	require.NoError(t, err)
 	stakingID, _, err := k.ContractKeeper.Create(ctx, creator, stakingCode, nil)
@@ -189,17 +191,17 @@ func initializeStaking(t *testing.T) initInfo {
 
 	// register to a valid address
 	initMsg := StakingInitMsg{
-		Name:         "Staking Derivatives",
-		Symbol:       "DRV",
-		Decimals:     0,
-		Validator:    valAddr,
-		ExitTax:      sdk.MustNewDecFromStr("0.10"),
-		MinWithdrawl: "100",
+		Name:          "Staking Derivatives",
+		Symbol:        "DRV",
+		Decimals:      0,
+		Validator:     valAddr,
+		ExitTax:       sdkmath.LegacyMustNewDecFromStr("0.10"),
+		MinWithdrawal: "100",
 	}
 	initBz, err := json.Marshal(&initMsg)
 	require.NoError(t, err)
 
-	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivates - DRV", nil)
+	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivative - DRV", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, stakingAddr)
 
@@ -224,8 +226,8 @@ func TestBonding(t *testing.T) {
 	keeper, stakingKeeper, accKeeper, bankKeeper := initInfo.wasmKeeper, initInfo.stakingKeeper, initInfo.accKeeper, initInfo.bankKeeper
 
 	// initial checks of bonding state
-	val, found := stakingKeeper.GetValidator(ctx, valAddr)
-	require.True(t, found)
+	val, err := stakingKeeper.GetValidator(ctx, valAddr)
+	require.NoError(t, err)
 	initPower := val.GetDelegatorShares()
 
 	// bob has 160k, putting 80k into the contract
@@ -253,12 +255,12 @@ func TestBonding(t *testing.T) {
 	// make sure the proper number of tokens have been bonded
 	val, _ = stakingKeeper.GetValidator(ctx, valAddr)
 	finalPower := val.GetDelegatorShares()
-	assert.Equal(t, sdk.NewInt(80000), finalPower.Sub(initPower).TruncateInt())
+	assert.Equal(t, sdkmath.NewInt(80000), finalPower.Sub(initPower).TruncateInt())
 
 	// check the delegation itself
-	d, found := stakingKeeper.GetDelegation(ctx, contractAddr, valAddr)
-	require.True(t, found)
-	assert.Equal(t, d.Shares, sdk.MustNewDecFromStr("80000"))
+	d, err := stakingKeeper.GetDelegation(ctx, contractAddr, valAddr)
+	require.NoError(t, err)
+	assert.Equal(t, d.Shares, sdkmath.LegacyMustNewDecFromStr("80000"))
 
 	// check we have the desired balance
 	assertBalance(t, ctx, keeper, contractAddr, bob, "80000")
@@ -272,8 +274,8 @@ func TestUnbonding(t *testing.T) {
 	keeper, stakingKeeper, accKeeper, bankKeeper := initInfo.wasmKeeper, initInfo.stakingKeeper, initInfo.accKeeper, initInfo.bankKeeper
 
 	// initial checks of bonding state
-	val, found := stakingKeeper.GetValidator(ctx, valAddr)
-	require.True(t, found)
+	val, err := stakingKeeper.GetValidator(ctx, valAddr)
+	require.NoError(t, err)
 	initPower := val.GetDelegatorShares()
 
 	// bob has 160k, putting 80k into the contract
@@ -311,16 +313,16 @@ func TestUnbonding(t *testing.T) {
 	// make sure the proper number of tokens have been bonded (80k - 27k = 53k)
 	val, _ = stakingKeeper.GetValidator(ctx, valAddr)
 	finalPower := val.GetDelegatorShares()
-	assert.Equal(t, sdk.NewInt(53000), finalPower.Sub(initPower).TruncateInt(), finalPower.String())
+	assert.Equal(t, sdkmath.NewInt(53000), finalPower.Sub(initPower).TruncateInt(), finalPower.String())
 
 	// check the delegation itself
-	d, found := stakingKeeper.GetDelegation(ctx, contractAddr, valAddr)
-	require.True(t, found)
-	assert.Equal(t, d.Shares, sdk.MustNewDecFromStr("53000"))
+	d, err := stakingKeeper.GetDelegation(ctx, contractAddr, valAddr)
+	require.NoError(t, err)
+	assert.Equal(t, d.Shares, sdkmath.LegacyMustNewDecFromStr("53000"))
 
 	// check there is unbonding in progress
-	un, found := stakingKeeper.GetUnbondingDelegation(ctx, contractAddr, valAddr)
-	require.True(t, found)
+	un, err := stakingKeeper.GetUnbondingDelegation(ctx, contractAddr, valAddr)
+	require.NoError(t, err)
 	require.Equal(t, 1, len(un.Entries))
 	assert.Equal(t, "27000", un.Entries[0].Balance.String())
 
@@ -338,10 +340,10 @@ func TestReinvest(t *testing.T) {
 	distKeeper := initInfo.distKeeper
 
 	// initial checks of bonding state
-	val, found := stakingKeeper.GetValidator(ctx, valAddr)
-	require.True(t, found)
+	val, err := stakingKeeper.GetValidator(ctx, valAddr)
+	require.NoError(t, err)
 	initPower := val.GetDelegatorShares()
-	assert.Equal(t, val.Tokens, sdk.NewInt(1000000), "%s", val.Tokens)
+	assert.Equal(t, val.Tokens, sdkmath.NewInt(1000000), "%s", val.Tokens)
 
 	// full is 2x funds, 1x goes to the contract, other stays on his wallet
 	full := sdk.NewCoins(sdk.NewInt64Coin("stake", 400000))
@@ -378,19 +380,19 @@ func TestReinvest(t *testing.T) {
 	checkAccount(t, ctx, accKeeper, bankKeeper, bob, funds)
 
 	// check the delegation itself
-	d, found := stakingKeeper.GetDelegation(ctx, contractAddr, valAddr)
-	require.True(t, found)
+	d, err := stakingKeeper.GetDelegation(ctx, contractAddr, valAddr)
+	require.NoError(t, err)
 	// we started with 200k and added 36k
-	assert.Equal(t, d.Shares, sdk.MustNewDecFromStr("236000"))
+	assert.Equal(t, d.Shares, sdkmath.LegacyMustNewDecFromStr("236000"))
 
 	// make sure the proper number of tokens have been bonded (80k + 40k = 120k)
 	val, _ = stakingKeeper.GetValidator(ctx, valAddr)
 	finalPower := val.GetDelegatorShares()
-	assert.Equal(t, sdk.NewInt(236000), finalPower.Sub(initPower).TruncateInt(), finalPower.String())
+	assert.Equal(t, sdkmath.NewInt(236000), finalPower.Sub(initPower).TruncateInt(), finalPower.String())
 
 	// check there is no unbonding in progress
-	un, found := stakingKeeper.GetUnbondingDelegation(ctx, contractAddr, valAddr)
-	assert.False(t, found, "%#v", un)
+	_, err = stakingKeeper.GetUnbondingDelegation(ctx, contractAddr, valAddr)
+	require.ErrorIs(t, stakingtypes.ErrNoUnbondingDelegation, err)
 
 	// check we have the desired balance
 	assertBalance(t, ctx, keeper, contractAddr, bob, "200000")
@@ -407,9 +409,9 @@ func TestQueryStakingInfo(t *testing.T) {
 	distKeeper := initInfo.distKeeper
 
 	// initial checks of bonding state
-	val, found := stakingKeeper.GetValidator(ctx, valAddr)
-	require.True(t, found)
-	assert.Equal(t, sdk.NewInt(1000000), val.Tokens)
+	val, err := stakingKeeper.GetValidator(ctx, valAddr)
+	require.NoError(t, err)
+	assert.Equal(t, sdkmath.NewInt(1000000), val.Tokens)
 
 	// full is 2x funds, 1x goes to the contract, other stays on his wallet
 	full := sdk.NewCoins(sdk.NewInt64Coin("stake", 400000))
@@ -432,7 +434,8 @@ func TestQueryStakingInfo(t *testing.T) {
 	setValidatorRewards(ctx, stakingKeeper, distKeeper, valAddr, "240000")
 
 	// see what the current rewards are
-	origReward := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	origReward, err := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	require.NoError(t, err)
 
 	// STEP 2: Prepare the mask contract
 	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000))
@@ -458,9 +461,9 @@ func TestQueryStakingInfo(t *testing.T) {
 	require.NoError(t, err)
 	// first we pull out the data from chain response, before parsing the original response
 	var reflectRes testdata.ChainResponse
-	mustParse(t, res, &reflectRes)
+	mustUnmarshal(t, res, &reflectRes)
 	var bondedRes wasmvmtypes.BondedDenomResponse
-	mustParse(t, reflectRes.Data, &bondedRes)
+	mustUnmarshal(t, reflectRes.Data, &bondedRes)
 	assert.Equal(t, "stake", bondedRes.Denom)
 
 	// now, let's reflect a smart query into the x/wasm handlers and see if we get the same result
@@ -471,9 +474,9 @@ func TestQueryStakingInfo(t *testing.T) {
 	res, err = keeper.QuerySmart(ctx, maskAddr, reflectAllValidatorsBin)
 	require.NoError(t, err)
 	// first we pull out the data from chain response, before parsing the original response
-	mustParse(t, res, &reflectRes)
+	mustUnmarshal(t, res, &reflectRes)
 	var allValidatorsRes wasmvmtypes.AllValidatorsResponse
-	mustParse(t, reflectRes.Data, &allValidatorsRes)
+	mustUnmarshal(t, reflectRes.Data, &allValidatorsRes)
 	require.Len(t, allValidatorsRes.Validators, 1, string(res))
 	valInfo := allValidatorsRes.Validators[0]
 	// Note: this ValAddress not AccAddress, may change with #264
@@ -492,9 +495,9 @@ func TestQueryStakingInfo(t *testing.T) {
 	res, err = keeper.QuerySmart(ctx, maskAddr, reflectValidatorBin)
 	require.NoError(t, err)
 	// first we pull out the data from chain response, before parsing the original response
-	mustParse(t, res, &reflectRes)
+	mustUnmarshal(t, res, &reflectRes)
 	var validatorRes wasmvmtypes.ValidatorResponse
-	mustParse(t, reflectRes.Data, &validatorRes)
+	mustUnmarshal(t, reflectRes.Data, &validatorRes)
 	require.NotNil(t, validatorRes.Validator)
 	valInfo = *validatorRes.Validator
 	// Note: this ValAddress not AccAddress, may change with #264
@@ -514,9 +517,9 @@ func TestQueryStakingInfo(t *testing.T) {
 	res, err = keeper.QuerySmart(ctx, maskAddr, reflectNoValidatorBin)
 	require.NoError(t, err)
 	// first we pull out the data from chain response, before parsing the original response
-	mustParse(t, res, &reflectRes)
+	mustUnmarshal(t, res, &reflectRes)
 	var noValidatorRes wasmvmtypes.ValidatorResponse
-	mustParse(t, reflectRes.Data, &noValidatorRes)
+	mustUnmarshal(t, reflectRes.Data, &noValidatorRes)
 	require.Nil(t, noValidatorRes.Validator)
 
 	// test to get all my delegations
@@ -529,9 +532,9 @@ func TestQueryStakingInfo(t *testing.T) {
 	res, err = keeper.QuerySmart(ctx, maskAddr, reflectAllDelegationsBin)
 	require.NoError(t, err)
 	// first we pull out the data from chain response, before parsing the original response
-	mustParse(t, res, &reflectRes)
+	mustUnmarshal(t, res, &reflectRes)
 	var allDelegationsRes wasmvmtypes.AllDelegationsResponse
-	mustParse(t, reflectRes.Data, &allDelegationsRes)
+	mustUnmarshal(t, reflectRes.Data, &allDelegationsRes)
 	require.Len(t, allDelegationsRes.Delegations, 1)
 	delInfo := allDelegationsRes.Delegations[0]
 	// Note: this ValAddress not AccAddress, may change with #264
@@ -553,10 +556,10 @@ func TestQueryStakingInfo(t *testing.T) {
 	res, err = keeper.QuerySmart(ctx, maskAddr, reflectDelegationBin)
 	require.NoError(t, err)
 	// first we pull out the data from chain response, before parsing the original response
-	mustParse(t, res, &reflectRes)
+	mustUnmarshal(t, res, &reflectRes)
 
 	var delegationRes wasmvmtypes.DelegationResponse
-	mustParse(t, reflectRes.Data, &delegationRes)
+	mustUnmarshal(t, reflectRes.Data, &delegationRes)
 	assert.NotEmpty(t, delegationRes.Delegation)
 	delInfo2 := delegationRes.Delegation
 	// Note: this ValAddress not AccAddress, may change with #264
@@ -573,7 +576,8 @@ func TestQueryStakingInfo(t *testing.T) {
 	require.Equal(t, wasmvmtypes.NewCoin(36000, "stake"), delInfo2.AccumulatedRewards[0])
 
 	// ensure rewards did not change when querying (neither amount nor period)
-	finalReward := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	finalReward, err := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	require.NoError(t, err)
 	require.Equal(t, origReward, finalReward)
 }
 
@@ -585,9 +589,9 @@ func TestQueryStakingPlugin(t *testing.T) {
 	distKeeper := initInfo.distKeeper
 
 	// initial checks of bonding state
-	val, found := stakingKeeper.GetValidator(ctx, valAddr)
-	require.True(t, found)
-	assert.Equal(t, sdk.NewInt(1000000), val.Tokens)
+	val, err := stakingKeeper.GetValidator(ctx, valAddr)
+	require.NoError(t, err)
+	assert.Equal(t, sdkmath.NewInt(1000000), val.Tokens)
 
 	// full is 2x funds, 1x goes to the contract, other stays on his wallet
 	full := sdk.NewCoins(sdk.NewInt64Coin("stake", 400000))
@@ -610,7 +614,8 @@ func TestQueryStakingPlugin(t *testing.T) {
 	setValidatorRewards(ctx, stakingKeeper, distKeeper, valAddr, "240000")
 
 	// see what the current rewards are
-	origReward := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	origReward, err := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	require.NoError(t, err)
 
 	// Step 2: Try out the query plugins
 	query := wasmvmtypes.StakingQuery{
@@ -622,7 +627,7 @@ func TestQueryStakingPlugin(t *testing.T) {
 	raw, err := StakingQuerier(stakingKeeper, distributionkeeper.NewQuerier(distKeeper))(ctx, &query)
 	require.NoError(t, err)
 	var res wasmvmtypes.DelegationResponse
-	mustParse(t, raw, &res)
+	mustUnmarshal(t, raw, &res)
 	assert.NotEmpty(t, res.Delegation)
 	delInfo := res.Delegation
 	// Note: this ValAddress not AccAddress, may change with #264
@@ -639,8 +644,22 @@ func TestQueryStakingPlugin(t *testing.T) {
 	require.Equal(t, wasmvmtypes.NewCoin(36000, "stake"), delInfo.AccumulatedRewards[0])
 
 	// ensure rewards did not change when querying (neither amount nor period)
-	finalReward := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	finalReward, err := distKeeper.GetValidatorCurrentRewards(ctx, valAddr)
+	require.NoError(t, err)
 	require.Equal(t, origReward, finalReward)
+
+	// with empty delegation (regression to ensure api stability)
+	query = wasmvmtypes.StakingQuery{
+		Delegation: &wasmvmtypes.DelegationQuery{
+			Delegator: RandomBech32AccountAddress(t),
+			Validator: valAddr.String(),
+		},
+	}
+	raw, err = StakingQuerier(stakingKeeper, distributionkeeper.NewQuerier(distKeeper))(ctx, &query)
+	require.NoError(t, err)
+	var res2 wasmvmtypes.DelegationResponse
+	mustUnmarshal(t, raw, &res2)
+	assert.Empty(t, res2.Delegation)
 }
 
 // adds a few validators and returns a list of validators that are registered
@@ -649,7 +668,7 @@ func addValidator(t *testing.T, ctx sdk.Context, stakingKeeper *stakingkeeper.Ke
 
 	privKey := secp256k1.GenPrivKey()
 	pubKey := privKey.PubKey()
-	addr := sdk.ValAddress(pubKey.Address())
+	valAddr := sdk.ValAddress(owner)
 
 	pkAny, err := codectypes.NewAnyWithValue(pubKey)
 	require.NoError(t, err)
@@ -658,42 +677,50 @@ func addValidator(t *testing.T, ctx sdk.Context, stakingKeeper *stakingkeeper.Ke
 			Moniker: "Validator power",
 		},
 		Commission: stakingtypes.CommissionRates{
-			Rate:          sdk.MustNewDecFromStr("0.1"),
-			MaxRate:       sdk.MustNewDecFromStr("0.2"),
-			MaxChangeRate: sdk.MustNewDecFromStr("0.01"),
+			Rate:          sdkmath.LegacyMustNewDecFromStr("0.1"),
+			MaxRate:       sdkmath.LegacyMustNewDecFromStr("0.2"),
+			MaxChangeRate: sdkmath.LegacyMustNewDecFromStr("0.01"),
 		},
-		MinSelfDelegation: sdk.OneInt(),
+		MinSelfDelegation: sdkmath.OneInt(),
 		DelegatorAddress:  owner.String(),
-		ValidatorAddress:  addr.String(),
+		ValidatorAddress:  valAddr.String(),
 		Pubkey:            pkAny,
 		Value:             value,
 	}
-	_, err = stakingkeeper.NewMsgServerImpl(stakingKeeper).CreateValidator(sdk.WrapSDKContext(ctx), msg)
+	_, err = stakingkeeper.NewMsgServerImpl(stakingKeeper).CreateValidator(ctx, msg)
 	require.NoError(t, err)
-	return addr
+	return valAddr
 }
 
 // this will commit the current set, update the block height and set historic info
 // basically, letting two blocks pass
 func nextBlock(ctx sdk.Context, stakingKeeper *stakingkeeper.Keeper) sdk.Context {
-	staking.EndBlocker(ctx, stakingKeeper)
+	if _, err := stakingKeeper.EndBlocker(ctx); err != nil {
+		panic(err)
+	}
 	ctx = ctx.WithBlockHeight(ctx.BlockHeight() + 1)
-	staking.BeginBlocker(ctx, stakingKeeper)
+	_ = stakingKeeper.BeginBlocker(ctx)
 	return ctx
 }
 
 func setValidatorRewards(ctx sdk.Context, stakingKeeper *stakingkeeper.Keeper, distKeeper distributionkeeper.Keeper, valAddr sdk.ValAddress, reward string) {
 	// allocate some rewards
-	vali := stakingKeeper.Validator(ctx, valAddr)
-	amount, err := sdk.NewDecFromStr(reward)
+	vali, err := stakingKeeper.Validator(ctx, valAddr)
+	if err != nil {
+		panic(err)
+	}
+	amount, err := sdkmath.LegacyNewDecFromStr(reward)
 	if err != nil {
 		panic(err)
 	}
 	payout := sdk.DecCoins{{Denom: "stake", Amount: amount}}
-	distKeeper.AllocateTokensToValidator(ctx, vali, payout)
+	err = distKeeper.AllocateTokensToValidator(ctx, vali, payout)
+	if err != nil {
+		panic(err)
+	}
 }
 
-func assertBalance(t *testing.T, ctx sdk.Context, keeper Keeper, contract sdk.AccAddress, addr sdk.AccAddress, expected string) {
+func assertBalance(t *testing.T, ctx sdk.Context, keeper Keeper, contract, addr sdk.AccAddress, expected string) {
 	query := StakingQueryMsg{
 		Balance: &addressQuery{
 			Address: addr,
@@ -709,7 +736,7 @@ func assertBalance(t *testing.T, ctx sdk.Context, keeper Keeper, contract sdk.Ac
 	assert.Equal(t, expected, balance.Balance)
 }
 
-func assertClaims(t *testing.T, ctx sdk.Context, keeper Keeper, contract sdk.AccAddress, addr sdk.AccAddress, expected string) {
+func assertClaims(t *testing.T, ctx sdk.Context, keeper Keeper, contract, addr sdk.AccAddress, expected string) {
 	query := StakingQueryMsg{
 		Claims: &addressQuery{
 			Address: addr,

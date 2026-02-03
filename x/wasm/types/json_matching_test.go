@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
 	// sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -127,7 +126,7 @@ func TestIsJSONObjectWithTopLevelKey(t *testing.T) {
 func TestDuplicateKeyGivesSameResult(t *testing.T) {
 	jsonBytes := []byte(`{"event⑨thing": "foo", "event⑨thing":"bar"}`)
 	for i := 0; i < 10000; i++ {
-		document := map[string]interface{}{}
+		document := map[string]any{}
 		require.NoError(t, json.Unmarshal(jsonBytes, &document))
 		assert.Equal(t, "bar", document["event⑨thing"])
 	}

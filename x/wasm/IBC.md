@@ -13,10 +13,11 @@ This documents how CosmWasm contracts are expected to interact with IBC.
   If this feature is enabled, it is considered "IBC Enabled", and that info will
   be stored in the ContractInfo. (For mock, we assume all contracts are IBC enabled)
   
-Also, please read the [IBC Docs](https://docs.cosmos.network/master/ibc/overview.html)
-for detailed descriptions of the terms *Port*, *Client*, *Connection*,
-and *Channel*
-  
+Also, please read the [IBC Docs](https://ibc.cosmos.network/v8/ibc/overview/)
+for detailed descriptions of the terms [*Port*](https://ibc.cosmos.network/v8/ibc/overview/#ports),
+[*Client*](https://ibc.cosmos.network/v8/ibc/overview/#clients), [*Connection*](https://ibc.cosmos.network/v8/ibc/overview/#connections),
+and [*Channel*](https://ibc.cosmos.network/v8/ibc/overview/#channels)
+
 ## Overview
 
 We use "One Port per Contract", which is the most straight-forward mapping, treating each contract 
@@ -24,7 +25,7 @@ like a module. It does lead to very long portIDs however. Pay special attention 
 (which should be compatible with standard ICS20 modules without changes on their part), as well
 as how contracts can properly identify their counterparty.
 
-(We considered on port for the `x/wasm` module and multiplexing on it, but [dismissed that idea](#rejected-ideas))
+(We considered one port for the `x/wasm` module and multiplexing on it, but [dismissed that idea](#rejected-ideas))
 
 * Upon `Instantiate`, if a contract is *IBC Enabled*, we dynamically 
   bind a port for this contract. The port name is `wasm.<contract address>`,
@@ -32,8 +33,8 @@ as how contracts can properly identify their counterparty.
 * If a *Channel* is being established with a registered `wasm.xyz` port,
   the `x/wasm.Keeper` will handle this and call into the appropriate
   contract to determine supported protocol versions during the
-  [`ChanOpenTry` and `ChanOpenAck` phases](https://docs.cosmos.network/master/ibc/overview.html#channels).
-  (See [Channel Handshake Version Negotiation](https://docs.cosmos.network/master/ibc/custom.html#channel-handshake-version-negotiation))
+  [`ChanOpenTry` and `ChanOpenAck` phases](https://ibc.cosmos.network/v8/ibc/overview/#channels).
+  (See [Channel Handshake Version Negotiation](https://docs.cosmos.network/v0.45/ibc/custom.html#channel-handshake-version-negotiation))
 * Both the *Port* and the *Channel* are fully owned by one contract.
 * `x/wasm` will allow both *ORDERED* and *UNORDERED* channels and pass that mode
   down to the contract in `OnChanOpenTry`, so the contract can decide if it accepts
@@ -60,7 +61,7 @@ module and must be created by the same means as for `ibc-transfer`
 For mocks, all the Packet Handling and Channel Lifecycle Hooks are routed 
 to some Golang stub handler, but containing the contract address, so we
 can perform contract-specific actions for each packet. In a real setting,
-we route to the contract that owns the port/channel and call one of it's various
+we route to the contract that owns the port/channel and call one of its various
 entry points.
 
 Please refer to the CosmWasm repo for all 
@@ -122,9 +123,9 @@ To clarify:
     parties in this way.
   * Other ideas: have a special field we send on `OnChanOpenInit` that
     specifies the destination contract, and allow any *ChannelID*.
-    However, looking at [`OnChanOpenInit` function signature](https://docs.cosmos.network/master/ibc/custom.html#implement-ibcmodule-interface-and-callbacks),
+    However, looking at [`OnChanOpenInit` function signature](https://docs.cosmos.network/v0.45/ibc/custom.html#implement-ibcmodule-interface-and-callbacks),
     I don't see a place to put this extra info, without abusing the version field,
-    which is a [specified field](https://docs.cosmos.network/master/ibc/custom.html#channel-handshake-version-negotiation):
+    which is a [specified field](https://docs.cosmos.network/v0.45/ibc/custom.html#channel-handshake-version-negotiation):
     ```
     Versions must be strings but can implement any versioning structure. 
     If your application plans to have linear releases then semantic versioning is recommended.

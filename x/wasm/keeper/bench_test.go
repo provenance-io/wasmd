@@ -4,14 +4,15 @@ import (
 	"os"
 	"testing"
 
-	dbm "github.com/cometbft/cometbft-db"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
+	dbm "github.com/cosmos/cosmos-db"
 	"github.com/stretchr/testify/require"
+
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
-// BenchmarkVerification benchmarks secp256k1 verification which is 1000 gas based on cpu time.
+// BenchmarkGasNormalization benchmarks secp256k1 verification which is 1000 gas based on cpu time.
 //
 // Just this function is copied from
 // https://github.com/cosmos/cosmos-sdk/blob/90e9370bd80d9a3d41f7203ddb71166865561569/crypto/keys/internal/benchmarking/bench.go#L48-L62
@@ -27,7 +28,7 @@ func BenchmarkGasNormalization(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		pub.VerifySignature(message, signature)
 	}
 }
@@ -50,14 +51,14 @@ func BenchmarkInstantiationOverhead(b *testing.B) {
 	}
 	for name, spec := range specs {
 		b.Run(name, func(b *testing.B) {
-			wasmConfig := types.WasmConfig{MemoryCacheSize: 0}
-			ctx, keepers := createTestInput(b, false, AvailableCapabilities, wasmConfig, spec.db())
+			nodeConfig := types.NodeConfig{MemoryCacheSize: 0}
+			ctx, keepers := createTestInput(b, false, AvailableCapabilities, nodeConfig, types.VMConfig{}, spec.db())
 			example := InstantiateHackatomExampleContract(b, ctx, keepers)
 			if spec.pinned {
 				require.NoError(b, keepers.ContractKeeper.PinCode(ctx, example.CodeID))
 			}
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_, err := keepers.WasmKeeper.QuerySmart(ctx, example.Contract, []byte(`{"verifier":{}}`))
 				require.NoError(b, err)
 			}
@@ -84,9 +85,9 @@ func BenchmarkCompilation(b *testing.B) {
 
 	for name, spec := range specs {
 		b.Run(name, func(b *testing.B) {
-			wasmConfig := types.WasmConfig{MemoryCacheSize: 0}
+			nodeConfig := types.NodeConfig{MemoryCacheSize: 0}
 			db := dbm.NewMemDB()
-			ctx, keepers := createTestInput(b, false, AvailableCapabilities, wasmConfig, db)
+			ctx, keepers := createTestInput(b, false, AvailableCapabilities, nodeConfig, types.VMConfig{}, db)
 
 			// print out code size for comparisons
 			code, err := os.ReadFile(spec.wasmFile)
@@ -94,7 +95,7 @@ func BenchmarkCompilation(b *testing.B) {
 			b.Logf("\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b(size: %d)  ", len(code))
 
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = StoreExampleContract(b, ctx, keepers, spec.wasmFile)
 			}
 		})

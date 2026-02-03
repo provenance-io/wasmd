@@ -1,22 +1,18 @@
 package app
 
 import (
+	ibckeeper "github.com/cosmos/ibc-go/v10/modules/core/keeper"
+
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
-	capabilitykeeper "github.com/cosmos/cosmos-sdk/x/capability/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
-	ibckeeper "github.com/cosmos/ibc-go/v7/modules/core/keeper"
 
-	"github.com/CosmWasm/wasmd/x/wasm"
+	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 )
 
 func (app *WasmApp) GetIBCKeeper() *ibckeeper.Keeper {
 	return app.IBCKeeper
-}
-
-func (app *WasmApp) GetScopedIBCKeeper() capabilitykeeper.ScopedKeeper {
-	return app.ScopedIBCKeeper
 }
 
 func (app *WasmApp) GetBaseApp() *baseapp.BaseApp {
@@ -35,6 +31,6 @@ func (app *WasmApp) GetAccountKeeper() authkeeper.AccountKeeper {
 	return app.AccountKeeper
 }
 
-func (app *WasmApp) GetWasmKeeper() wasm.Keeper {
+func (app *WasmApp) GetWasmKeeper() wasmkeeper.Keeper {
 	return app.WasmKeeper
 }

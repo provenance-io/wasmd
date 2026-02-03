@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/CosmWasm/wasmd/x/wasm/keeper"
+	"github.com/stretchr/testify/require"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/address"
-	"github.com/stretchr/testify/require"
 
+	"github.com/CosmWasm/wasmd/x/wasm/keeper"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
 func TestMigrate1To2(t *testing.T) {
-	const AvailableCapabilities = "iterator,staking,stargate,cosmwasm_1_1"
+	AvailableCapabilities := []string{"iterator", "staking", "stargate", "cosmwasm_1_1"}
 	ctx, keepers := keeper.CreateTestInput(t, false, AvailableCapabilities)
 	wasmKeeper := keepers.WasmKeeper
 

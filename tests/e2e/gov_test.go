@@ -4,17 +4,20 @@ import (
 	"testing"
 	"time"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	ibctesting "github.com/cosmos/ibc-go/v10/testing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/CosmWasm/wasmd/app"
+	sdkmath "cosmossdk.io/math"
+
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	v1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	protocolpooltypes "github.com/cosmos/cosmos-sdk/x/protocolpool/types"
+
 	"github.com/CosmWasm/wasmd/tests/e2e"
-	"github.com/CosmWasm/wasmd/x/wasm/ibctesting"
+	wasmibctesting "github.com/CosmWasm/wasmd/tests/wasmibctesting"
 )
 
 func TestGovVoteByContract(t *testing.T) {
@@ -23,10 +26,10 @@ func TestGovVoteByContract(t *testing.T) {
 	// When  the contract sends a vote for the proposal
 	// Then	 the vote is taken into account
 
-	coord := ibctesting.NewCoordinator(t, 1)
-	chain := coord.GetChain(ibctesting.GetChainID(1))
+	coord := wasmibctesting.NewCoordinator(t, 1)
+	chain := wasmibctesting.NewWasmTestChain(coord.GetChain(ibctesting.GetChainID(1)))
 	contractAddr := e2e.InstantiateReflectContract(t, chain)
-	chain.Fund(contractAddr, sdk.NewIntFromUint64(1_000_000_000))
+	chain.Fund(contractAddr, sdkmath.NewIntFromUint64(1_000_000_000))
 	// a contract with a high delegation amount
 	delegateMsg := wasmvmtypes.CosmosMsg{
 		Staking: &wasmvmtypes.StakingMsg{
@@ -42,12 +45,14 @@ func TestGovVoteByContract(t *testing.T) {
 	e2e.MustExecViaReflectContract(t, chain, contractAddr, delegateMsg)
 
 	signer := chain.SenderAccount.GetAddress().String()
-	app := chain.App.(*app.WasmApp)
+	app := chain.GetWasmApp()
 	govKeeper, accountKeeper := app.GovKeeper, app.AccountKeeper
-	communityPoolBalance := chain.Balance(accountKeeper.GetModuleAccount(chain.GetContext(), distributiontypes.ModuleName).GetAddress(), sdk.DefaultBondDenom)
+	communityPoolBalance := chain.Balance(accountKeeper.GetModuleAccount(chain.GetContext(), protocolpooltypes.ModuleName).GetAddress(), sdk.DefaultBondDenom)
 	require.False(t, communityPoolBalance.IsZero())
 
-	initialDeposit := govKeeper.GetParams(chain.GetContext()).MinDeposit
+	gParams, err := govKeeper.Params.Get(chain.GetContext())
+	require.NoError(t, err)
+	initialDeposit := gParams.MinDeposit
 	govAcctAddr := govKeeper.GetGovernanceAccount(chain.GetContext()).GetAddress()
 
 	specs := map[string]struct {
@@ -56,25 +61,25 @@ func TestGovVoteByContract(t *testing.T) {
 	}{
 		"yes": {
 			vote: &wasmvmtypes.VoteMsg{
-				Vote: wasmvmtypes.Yes,
+				Option: wasmvmtypes.Yes,
 			},
 			expPass: true,
 		},
 		"no": {
 			vote: &wasmvmtypes.VoteMsg{
-				Vote: wasmvmtypes.No,
+				Option: wasmvmtypes.No,
 			},
 			expPass: false,
 		},
 		"abstain": {
 			vote: &wasmvmtypes.VoteMsg{
-				Vote: wasmvmtypes.Abstain,
+				Option: wasmvmtypes.Abstain,
 			},
 			expPass: true,
 		},
 		"no with veto": {
 			vote: &wasmvmtypes.VoteMsg{
-				Vote: wasmvmtypes.NoWithVeto,
+				Option: wasmvmtypes.NoWithVeto,
 			},
 			expPass: false,
 		},
@@ -84,10 +89,10 @@ func TestGovVoteByContract(t *testing.T) {
 			// given a unique recipient
 			recipientAddr := sdk.AccAddress(secp256k1.GenPrivKey().PubKey().Address().Bytes())
 			// and a new proposal
-			payloadMsg := &distributiontypes.MsgCommunityPoolSpend{
+			payloadMsg := &protocolpooltypes.MsgCommunityPoolSpend{
 				Authority: govAcctAddr.String(),
 				Recipient: recipientAddr.String(),
-				Amount:    sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdk.OneInt())),
+				Amount:    sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.OneInt())),
 			}
 			msg, err := v1.NewMsgSubmitProposal(
 				[]sdk.Msg{payloadMsg},
@@ -96,13 +101,14 @@ func TestGovVoteByContract(t *testing.T) {
 				"",
 				"my proposal",
 				"testing",
+				false,
 			)
 			require.NoError(t, err)
 			rsp, gotErr := chain.SendMsgs(msg)
 			require.NoError(t, gotErr)
-			require.Len(t, rsp.MsgResponses, 1)
-			got, ok := rsp.MsgResponses[0].GetCachedValue().(*v1.MsgSubmitProposalResponse)
-			require.True(t, ok)
+			var got v1.MsgSubmitProposalResponse
+			chain.UnwrapExecTXResult(rsp, &got)
+
 			propID := got.ProposalId
 
 			// with other delegators voted yes
@@ -119,10 +125,10 @@ func TestGovVoteByContract(t *testing.T) {
 			e2e.MustExecViaReflectContract(t, chain, contractAddr, voteMsg)
 
 			// then proposal executed after voting period
-			proposal, ok := govKeeper.GetProposal(chain.GetContext(), propID)
-			require.True(t, ok)
+			proposal, err := govKeeper.Proposals.Get(chain.GetContext(), propID)
+			require.NoError(t, err)
 			coord.IncrementTimeBy(proposal.VotingEndTime.Sub(chain.GetContext().BlockTime()) + time.Minute)
-			coord.CommitBlock(chain)
+			coord.CommitBlock(chain.TestChain)
 
 			// and recipient balance updated
 			recipientBalance := chain.Balance(recipientAddr, sdk.DefaultBondDenom)
@@ -130,7 +136,7 @@ func TestGovVoteByContract(t *testing.T) {
 				assert.True(t, recipientBalance.IsZero())
 				return
 			}
-			expBalanceAmount := sdk.NewCoin(sdk.DefaultBondDenom, sdk.OneInt())
+			expBalanceAmount := sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.OneInt())
 			assert.Equal(t, expBalanceAmount.String(), recipientBalance.String())
 		})
 	}

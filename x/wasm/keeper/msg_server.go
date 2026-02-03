@@ -2,8 +2,10 @@ package keeper
 
 import (
 	"context"
+	"slices"
 
 	errorsmod "cosmossdk.io/errors"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/CosmWasm/wasmd/x/wasm/types"
@@ -22,17 +24,16 @@ func NewMsgServerImpl(k *Keeper) types.MsgServer {
 }
 
 // StoreCode stores a new wasm code on chain
-func (m msgServer) StoreCode(goCtx context.Context, msg *types.MsgStoreCode) (*types.MsgStoreCodeResponse, error) {
+func (m msgServer) StoreCode(ctx context.Context, msg *types.MsgStoreCode) (*types.MsgStoreCodeResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
 		return nil, errorsmod.Wrap(err, "sender")
 	}
 
-	policy := m.selectAuthorizationPolicy(msg.Sender)
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
 
 	codeID, checksum, err := m.keeper.create(ctx, senderAddr, msg.WASMByteCode, msg.InstantiatePermission, policy)
 	if err != nil {
@@ -46,11 +47,10 @@ func (m msgServer) StoreCode(goCtx context.Context, msg *types.MsgStoreCode) (*t
 }
 
 // InstantiateContract instantiate a new contract with classic sequence based address generation
-func (m msgServer) InstantiateContract(goCtx context.Context, msg *types.MsgInstantiateContract) (*types.MsgInstantiateContractResponse, error) {
+func (m msgServer) InstantiateContract(ctx context.Context, msg *types.MsgInstantiateContract) (*types.MsgInstantiateContractResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-	ctx := sdk.UnwrapSDKContext(goCtx)
 
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
@@ -63,7 +63,7 @@ func (m msgServer) InstantiateContract(goCtx context.Context, msg *types.MsgInst
 		}
 	}
 
-	policy := m.selectAuthorizationPolicy(msg.Sender)
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
 
 	contractAddr, data, err := m.keeper.instantiate(ctx, msg.CodeID, senderAddr, adminAddr, msg.Msg, msg.Label, msg.Funds, m.keeper.ClassicAddressGenerator(), policy)
 	if err != nil {
@@ -76,12 +76,11 @@ func (m msgServer) InstantiateContract(goCtx context.Context, msg *types.MsgInst
 	}, nil
 }
 
-// InstantiateContract2 instantiate a new contract with predicatable address generated
-func (m msgServer) InstantiateContract2(goCtx context.Context, msg *types.MsgInstantiateContract2) (*types.MsgInstantiateContract2Response, error) {
+// InstantiateContract2 instantiate a new contract with a predictable address generated
+func (m msgServer) InstantiateContract2(ctx context.Context, msg *types.MsgInstantiateContract2) (*types.MsgInstantiateContract2Response, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-	ctx := sdk.UnwrapSDKContext(goCtx)
 
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
@@ -94,9 +93,9 @@ func (m msgServer) InstantiateContract2(goCtx context.Context, msg *types.MsgIns
 		}
 	}
 
-	policy := m.selectAuthorizationPolicy(msg.Sender)
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
 
-	addrGenerator := PredicableAddressGenerator(senderAddr, msg.Salt, msg.Msg, msg.FixMsg)
+	addrGenerator := PredictableAddressGenerator(senderAddr, msg.Salt, msg.Msg, msg.FixMsg)
 
 	contractAddr, data, err := m.keeper.instantiate(ctx, msg.CodeID, senderAddr, adminAddr, msg.Msg, msg.Label, msg.Funds, addrGenerator, policy)
 	if err != nil {
@@ -109,12 +108,11 @@ func (m msgServer) InstantiateContract2(goCtx context.Context, msg *types.MsgIns
 	}, nil
 }
 
-func (m msgServer) ExecuteContract(goCtx context.Context, msg *types.MsgExecuteContract) (*types.MsgExecuteContractResponse, error) {
+func (m msgServer) ExecuteContract(ctx context.Context, msg *types.MsgExecuteContract) (*types.MsgExecuteContractResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
 		return nil, errorsmod.Wrap(err, "sender")
@@ -134,12 +132,11 @@ func (m msgServer) ExecuteContract(goCtx context.Context, msg *types.MsgExecuteC
 	}, nil
 }
 
-func (m msgServer) MigrateContract(goCtx context.Context, msg *types.MsgMigrateContract) (*types.MsgMigrateContractResponse, error) {
+func (m msgServer) MigrateContract(ctx context.Context, msg *types.MsgMigrateContract) (*types.MsgMigrateContractResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
 		return nil, errorsmod.Wrap(err, "sender")
@@ -149,7 +146,7 @@ func (m msgServer) MigrateContract(goCtx context.Context, msg *types.MsgMigrateC
 		return nil, errorsmod.Wrap(err, "contract")
 	}
 
-	policy := m.selectAuthorizationPolicy(msg.Sender)
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
 
 	data, err := m.keeper.migrate(ctx, contractAddr, senderAddr, msg.CodeID, msg.Msg, policy)
 	if err != nil {
@@ -161,12 +158,11 @@ func (m msgServer) MigrateContract(goCtx context.Context, msg *types.MsgMigrateC
 	}, nil
 }
 
-func (m msgServer) UpdateAdmin(goCtx context.Context, msg *types.MsgUpdateAdmin) (*types.MsgUpdateAdminResponse, error) {
+func (m msgServer) UpdateAdmin(ctx context.Context, msg *types.MsgUpdateAdmin) (*types.MsgUpdateAdminResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
 		return nil, errorsmod.Wrap(err, "sender")
@@ -180,7 +176,7 @@ func (m msgServer) UpdateAdmin(goCtx context.Context, msg *types.MsgUpdateAdmin)
 		return nil, errorsmod.Wrap(err, "new admin")
 	}
 
-	policy := m.selectAuthorizationPolicy(msg.Sender)
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
 
 	if err := m.keeper.setContractAdmin(ctx, contractAddr, senderAddr, newAdminAddr, policy); err != nil {
 		return nil, err
@@ -189,12 +185,11 @@ func (m msgServer) UpdateAdmin(goCtx context.Context, msg *types.MsgUpdateAdmin)
 	return &types.MsgUpdateAdminResponse{}, nil
 }
 
-func (m msgServer) ClearAdmin(goCtx context.Context, msg *types.MsgClearAdmin) (*types.MsgClearAdminResponse, error) {
+func (m msgServer) ClearAdmin(ctx context.Context, msg *types.MsgClearAdmin) (*types.MsgClearAdminResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
 		return nil, errorsmod.Wrap(err, "sender")
@@ -204,7 +199,7 @@ func (m msgServer) ClearAdmin(goCtx context.Context, msg *types.MsgClearAdmin) (
 		return nil, errorsmod.Wrap(err, "contract")
 	}
 
-	policy := m.selectAuthorizationPolicy(msg.Sender)
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
 
 	if err := m.keeper.setContractAdmin(ctx, contractAddr, senderAddr, nil, policy); err != nil {
 		return nil, err
@@ -213,17 +208,16 @@ func (m msgServer) ClearAdmin(goCtx context.Context, msg *types.MsgClearAdmin) (
 	return &types.MsgClearAdminResponse{}, nil
 }
 
-func (m msgServer) UpdateInstantiateConfig(goCtx context.Context, msg *types.MsgUpdateInstantiateConfig) (*types.MsgUpdateInstantiateConfigResponse, error) {
+func (m msgServer) UpdateInstantiateConfig(ctx context.Context, msg *types.MsgUpdateInstantiateConfig) (*types.MsgUpdateInstantiateConfigResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
 	if err != nil {
 		return nil, errorsmod.Wrap(err, "sender")
 	}
-	policy := m.selectAuthorizationPolicy(msg.Sender)
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
 
 	if err := m.keeper.setAccessConfig(ctx, msg.CodeID, senderAddr, *msg.NewInstantiatePermission, policy); err != nil {
 		return nil, err
@@ -233,7 +227,7 @@ func (m msgServer) UpdateInstantiateConfig(goCtx context.Context, msg *types.Msg
 }
 
 // UpdateParams updates the module parameters
-func (m msgServer) UpdateParams(goCtx context.Context, req *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
+func (m msgServer) UpdateParams(ctx context.Context, req *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
 	if err := req.ValidateBasic(); err != nil {
 		return nil, err
 	}
@@ -242,7 +236,6 @@ func (m msgServer) UpdateParams(goCtx context.Context, req *types.MsgUpdateParam
 		return nil, errorsmod.Wrapf(types.ErrInvalid, "invalid authority; expected %s, got %s", authority, req.Authority)
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	if err := m.keeper.SetParams(ctx, req.Params); err != nil {
 		return nil, err
 	}
@@ -251,7 +244,7 @@ func (m msgServer) UpdateParams(goCtx context.Context, req *types.MsgUpdateParam
 }
 
 // PinCodes pins a set of code ids in the wasmvm cache.
-func (m msgServer) PinCodes(goCtx context.Context, req *types.MsgPinCodes) (*types.MsgPinCodesResponse, error) {
+func (m msgServer) PinCodes(ctx context.Context, req *types.MsgPinCodes) (*types.MsgPinCodesResponse, error) {
 	if err := req.ValidateBasic(); err != nil {
 		return nil, err
 	}
@@ -261,7 +254,6 @@ func (m msgServer) PinCodes(goCtx context.Context, req *types.MsgPinCodes) (*typ
 		return nil, errorsmod.Wrapf(types.ErrInvalid, "invalid authority; expected %s, got %s", authority, req.Authority)
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	for _, codeID := range req.CodeIDs {
 		if err := m.keeper.pinCode(ctx, codeID); err != nil {
 			return nil, err
@@ -272,7 +264,7 @@ func (m msgServer) PinCodes(goCtx context.Context, req *types.MsgPinCodes) (*typ
 }
 
 // UnpinCodes unpins a set of code ids in the wasmvm cache.
-func (m msgServer) UnpinCodes(goCtx context.Context, req *types.MsgUnpinCodes) (*types.MsgUnpinCodesResponse, error) {
+func (m msgServer) UnpinCodes(ctx context.Context, req *types.MsgUnpinCodes) (*types.MsgUnpinCodesResponse, error) {
 	if err := req.ValidateBasic(); err != nil {
 		return nil, err
 	}
@@ -282,7 +274,6 @@ func (m msgServer) UnpinCodes(goCtx context.Context, req *types.MsgUnpinCodes) (
 		return nil, errorsmod.Wrapf(types.ErrInvalid, "invalid authority; expected %s, got %s", authority, req.Authority)
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	for _, codeID := range req.CodeIDs {
 		if err := m.keeper.unpinCode(ctx, codeID); err != nil {
 			return nil, err
@@ -293,7 +284,7 @@ func (m msgServer) UnpinCodes(goCtx context.Context, req *types.MsgUnpinCodes) (
 }
 
 // SudoContract calls sudo on a contract.
-func (m msgServer) SudoContract(goCtx context.Context, req *types.MsgSudoContract) (*types.MsgSudoContractResponse, error) {
+func (m msgServer) SudoContract(ctx context.Context, req *types.MsgSudoContract) (*types.MsgSudoContractResponse, error) {
 	if err := req.ValidateBasic(); err != nil {
 		return nil, err
 	}
@@ -307,7 +298,6 @@ func (m msgServer) SudoContract(goCtx context.Context, req *types.MsgSudoContrac
 		return nil, errorsmod.Wrap(err, "contract")
 	}
 
-	ctx := sdk.UnwrapSDKContext(goCtx)
 	data, err := m.keeper.Sudo(ctx, contractAddr, req.Msg)
 	if err != nil {
 		return nil, err
@@ -327,10 +317,6 @@ func (m msgServer) StoreAndInstantiateContract(goCtx context.Context, req *types
 		return nil, errorsmod.Wrap(err, "authority")
 	}
 
-	if err = req.ValidateBasic(); err != nil {
-		return nil, err
-	}
-
 	var adminAddr sdk.AccAddress
 	if req.Admin != "" {
 		if adminAddr, err = sdk.AccAddressFromBech32(req.Admin); err != nil {
@@ -339,7 +325,7 @@ func (m msgServer) StoreAndInstantiateContract(goCtx context.Context, req *types
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
-	policy := m.selectAuthorizationPolicy(req.Authority)
+	policy := m.selectAuthorizationPolicy(ctx, req.Authority)
 
 	codeID, _, err := m.keeper.create(ctx, authorityAddr, req.WASMByteCode, req.InstantiatePermission, policy)
 	if err != nil {
@@ -357,9 +343,137 @@ func (m msgServer) StoreAndInstantiateContract(goCtx context.Context, req *types
 	}, nil
 }
 
-func (m msgServer) selectAuthorizationPolicy(actor string) AuthorizationPolicy {
+// AddCodeUploadParamsAddresses adds addresses to code upload params
+func (m msgServer) AddCodeUploadParamsAddresses(goCtx context.Context, req *types.MsgAddCodeUploadParamsAddresses) (*types.MsgAddCodeUploadParamsAddressesResponse, error) {
+	if err := req.ValidateBasic(); err != nil {
+		return nil, err
+	}
+	authority := m.keeper.GetAuthority()
+	if authority != req.Authority {
+		return nil, errorsmod.Wrapf(types.ErrInvalid, "invalid authority; expected %s, got %s", authority, req.Authority)
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	params := m.keeper.GetParams(ctx)
+	if params.CodeUploadAccess.Permission != types.AccessTypeAnyOfAddresses {
+		return nil, errorsmod.Wrap(types.ErrInvalid, "permission")
+	}
+
+	addresses := params.CodeUploadAccess.Addresses
+	for _, newAddr := range req.Addresses {
+		if !slices.Contains(addresses, newAddr) {
+			addresses = append(addresses, newAddr)
+		}
+	}
+
+	params.CodeUploadAccess.Addresses = addresses
+	if err := m.keeper.SetParams(ctx, params); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgAddCodeUploadParamsAddressesResponse{}, nil
+}
+
+// RemoveCodeUploadParamsAddresses removes addresses to code upload params
+func (m msgServer) RemoveCodeUploadParamsAddresses(goCtx context.Context, req *types.MsgRemoveCodeUploadParamsAddresses) (*types.MsgRemoveCodeUploadParamsAddressesResponse, error) {
+	if err := req.ValidateBasic(); err != nil {
+		return nil, err
+	}
+	authority := m.keeper.GetAuthority()
+	if authority != req.Authority {
+		return nil, errorsmod.Wrapf(types.ErrInvalid, "invalid authority; expected %s, got %s", authority, req.Authority)
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	params := m.keeper.GetParams(ctx)
+	if params.CodeUploadAccess.Permission != types.AccessTypeAnyOfAddresses {
+		return nil, errorsmod.Wrap(types.ErrInvalid, "permission")
+	}
+	addresses := params.CodeUploadAccess.Addresses
+	newAddresses := make([]string, 0)
+	for _, addr := range addresses {
+		if slices.Contains(req.Addresses, addr) {
+			continue
+		}
+		newAddresses = append(newAddresses, addr)
+	}
+
+	params.CodeUploadAccess.Addresses = newAddresses
+
+	if err := m.keeper.SetParams(ctx, params); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgRemoveCodeUploadParamsAddressesResponse{}, nil
+}
+
+func (m msgServer) selectAuthorizationPolicy(ctx context.Context, actor string) types.AuthorizationPolicy {
 	if actor == m.keeper.GetAuthority() {
-		return GovAuthorizationPolicy{}
+		return newGovAuthorizationPolicy(m.keeper.propagateGovAuthorization)
+	}
+	if policy, ok := types.SubMsgAuthzPolicy(ctx); ok {
+		return policy
 	}
 	return DefaultAuthorizationPolicy{}
+}
+
+// StoreAndMigrateContract stores and migrates the contract.
+func (m msgServer) StoreAndMigrateContract(goCtx context.Context, req *types.MsgStoreAndMigrateContract) (*types.MsgStoreAndMigrateContractResponse, error) {
+	authorityAddr, err := sdk.AccAddressFromBech32(req.Authority)
+	if err != nil {
+		return nil, errorsmod.Wrap(err, "authority")
+	}
+
+	if err = req.ValidateBasic(); err != nil {
+		return nil, err
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	policy := m.selectAuthorizationPolicy(ctx, req.Authority)
+
+	codeID, checksum, err := m.keeper.create(ctx, authorityAddr, req.WASMByteCode, req.InstantiatePermission, policy)
+	if err != nil {
+		return nil, err
+	}
+
+	contractAddr, err := sdk.AccAddressFromBech32(req.Contract)
+	if err != nil {
+		return nil, errorsmod.Wrap(err, "contract")
+	}
+
+	data, err := m.keeper.migrate(ctx, contractAddr, authorityAddr, codeID, req.Msg, policy)
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.MsgStoreAndMigrateContractResponse{
+		CodeID:   codeID,
+		Checksum: checksum,
+		Data:     data,
+	}, nil
+}
+
+func (m msgServer) UpdateContractLabel(ctx context.Context, msg *types.MsgUpdateContractLabel) (*types.MsgUpdateContractLabelResponse, error) {
+	if err := msg.ValidateBasic(); err != nil {
+		return nil, err
+	}
+
+	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
+	if err != nil {
+		return nil, errorsmod.Wrap(err, "sender")
+	}
+	contractAddr, err := sdk.AccAddressFromBech32(msg.Contract)
+	if err != nil {
+		return nil, errorsmod.Wrap(err, "contract")
+	}
+
+	policy := m.selectAuthorizationPolicy(ctx, msg.Sender)
+
+	if err := m.keeper.setContractLabel(ctx, contractAddr, senderAddr, msg.NewLabel, policy); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgUpdateContractLabelResponse{}, nil
 }

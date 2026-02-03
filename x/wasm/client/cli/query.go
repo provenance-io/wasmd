@@ -10,12 +10,13 @@ import (
 	"os"
 	"strconv"
 
-	wasmvm "github.com/CosmWasm/wasmvm"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
+
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/spf13/cobra"
-	flag "github.com/spf13/pflag"
 
 	"github.com/CosmWasm/wasmd/x/wasm/keeper"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
@@ -77,31 +78,23 @@ func GetCmdBuildAddress() *cobra.Command {
 		Aliases: []string{"address"},
 		Args:    cobra.RangeArgs(3, 4),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			codeHash, err := hex.DecodeString(args[0])
-			if err != nil {
-				return fmt.Errorf("code-hash: %s", err)
-			}
-			creator, err := sdk.AccAddressFromBech32(args[1])
-			if err != nil {
-				return fmt.Errorf("creator: %s", err)
-			}
-			salt, err := hex.DecodeString(args[2])
-			switch {
-			case err != nil:
-				return fmt.Errorf("salt: %s", err)
-			case len(salt) == 0:
-				return errors.New("empty salt")
+			var initArgs []byte
+			if len(args) == 4 {
+				initArgs = types.RawContractMessage(args[3])
 			}
 
-			if len(args) == 3 {
-				cmd.Println(keeper.BuildContractAddressPredictable(codeHash, creator, salt, []byte{}).String())
-				return nil
+			res, err := keeper.BuildAddressPredictable(
+				&types.QueryBuildAddressRequest{
+					CodeHash:       args[0],
+					CreatorAddress: args[1],
+					Salt:           args[2],
+					InitArgs:       initArgs,
+				},
+			)
+			if err != nil {
+				return err
 			}
-			msg := types.RawContractMessage(args[3])
-			if err := msg.ValidateBasic(); err != nil {
-				return fmt.Errorf("init message: %s", err)
-			}
-			cmd.Println(keeper.BuildContractAddressPredictable(codeHash, creator, salt, msg).String())
+			fmt.Println(res.Address)
 			return nil
 		},
 		SilenceUsage: true,
@@ -143,7 +136,7 @@ func GetCmdListCode() *cobra.Command {
 		SilenceUsage: true,
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "list codes")
+	addPaginationFlags(cmd, "list codes")
 	return cmd
 }
 
@@ -189,7 +182,7 @@ func GetCmdListContractByCode() *cobra.Command {
 		SilenceUsage: true,
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "list contracts by code")
+	addPaginationFlags(cmd, "list contracts by code")
 	return cmd
 }
 
@@ -223,7 +216,7 @@ func GetCmdQueryCode() *cobra.Command {
 				return err
 			}
 			if len(res.Data) == 0 {
-				return fmt.Errorf("contract not found")
+				return errors.New("contract not found")
 			}
 
 			fmt.Printf("Downloading wasm code to %s\n", args[1])
@@ -254,20 +247,17 @@ func GetCmdQueryCodeInfo() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.Code(
+			res, err := queryClient.CodeInfo(
 				context.Background(),
-				&types.QueryCodeRequest{
+				&types.QueryCodeInfoRequest{
 					CodeId: codeID,
 				},
 			)
 			if err != nil {
 				return err
 			}
-			if res.CodeInfoResponse == nil {
-				return fmt.Errorf("contract not found")
-			}
 
-			return clientCtx.PrintProto(res.CodeInfoResponse)
+			return clientCtx.PrintProto(res)
 		},
 		SilenceUsage: true,
 	}
@@ -367,7 +357,7 @@ func GetCmdGetContractStateAll() *cobra.Command {
 		SilenceUsage: true,
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "contract state")
+	addPaginationFlags(cmd, "contract state")
 	return cmd
 }
 
@@ -376,7 +366,7 @@ func GetCmdGetContractStateRaw() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "raw [bech32_address] [key]",
 		Short: "Prints out internal state for key of a contract given its address",
-		Long:  "Prints out internal state for of a contract given its address",
+		Long:  "Prints out internal state of a contract given its address",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientQueryContext(cmd)
@@ -503,7 +493,7 @@ func GetCmdGetContractHistory() *cobra.Command {
 	}
 
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "contract history")
+	addPaginationFlags(cmd, "contract history")
 	return cmd
 }
 
@@ -539,7 +529,7 @@ func GetCmdListPinnedCode() *cobra.Command {
 		SilenceUsage: true,
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "list codes")
+	addPaginationFlags(cmd, "list codes")
 	return cmd
 }
 
@@ -580,7 +570,7 @@ func GetCmdListContractsByCreator() *cobra.Command {
 		SilenceUsage: true,
 	}
 	flags.AddQueryFlagsToCmd(cmd)
-	flags.AddPaginationFlagsToCmd(cmd, "list contracts by creator")
+	addPaginationFlags(cmd, "list contracts by creator")
 	return cmd
 }
 
@@ -672,4 +662,11 @@ func GetCmdQueryParams() *cobra.Command {
 	flags.AddQueryFlagsToCmd(cmd)
 
 	return cmd
+}
+
+// supports a subset of the SDK pagination params for better resource utilization
+func addPaginationFlags(cmd *cobra.Command, query string) {
+	cmd.Flags().String(flags.FlagPageKey, "", fmt.Sprintf("pagination page-key of %s to query for", query))
+	cmd.Flags().Uint64(flags.FlagLimit, 100, fmt.Sprintf("pagination limit of %s to query for", query))
+	cmd.Flags().Bool(flags.FlagReverse, false, "results are sorted in descending order")
 }

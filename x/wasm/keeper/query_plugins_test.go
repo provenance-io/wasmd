@@ -1,90 +1,42 @@
 package keeper_test
 
 import (
-	"encoding/hex"
+	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"sync/atomic"
 	"testing"
-	"time"
 
-	errorsmod "cosmossdk.io/errors"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
-	dbm "github.com/cometbft/cometbft-db"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	"github.com/cosmos/cosmos-sdk/codec"
-	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
-	"github.com/cosmos/cosmos-sdk/store"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/query"
-	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/gogoproto/proto"
-	channeltypes "github.com/cosmos/ibc-go/v7/modules/core/04-channel/types"
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
-	"github.com/CosmWasm/wasmd/app"
+	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
+	"cosmossdk.io/store"
+	storemetrics "cosmossdk.io/store/metrics"
+	storetypes "cosmossdk.io/store/types"
+
+	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/codec"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+
 	"github.com/CosmWasm/wasmd/x/wasm/keeper"
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/wasmtesting"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
 func TestIBCQuerier(t *testing.T) {
-	myExampleChannels := []channeltypes.IdentifiedChannel{
-		// this is returned
-		{
-			State:    channeltypes.OPEN,
-			Ordering: channeltypes.ORDERED,
-			Counterparty: channeltypes.Counterparty{
-				PortId:    "counterPartyPortID",
-				ChannelId: "counterPartyChannelID",
-			},
-			ConnectionHops: []string{"one"},
-			Version:        "v1",
-			PortId:         "myPortID",
-			ChannelId:      "myChannelID",
-		},
-		// this is filtered out
-		{
-			State:    channeltypes.INIT,
-			Ordering: channeltypes.UNORDERED,
-			Counterparty: channeltypes.Counterparty{
-				PortId: "foobar",
-			},
-			ConnectionHops: []string{"one"},
-			Version:        "initversion",
-			PortId:         "initPortID",
-			ChannelId:      "initChannelID",
-		},
-		// this is returned
-		{
-			State:    channeltypes.OPEN,
-			Ordering: channeltypes.UNORDERED,
-			Counterparty: channeltypes.Counterparty{
-				PortId:    "otherCounterPartyPortID",
-				ChannelId: "otherCounterPartyChannelID",
-			},
-			ConnectionHops: []string{"other", "second"},
-			Version:        "otherVersion",
-			PortId:         "otherPortID",
-			ChannelId:      "otherChannelID",
-		},
-		// this is filtered out
-		{
-			State:    channeltypes.CLOSED,
-			Ordering: channeltypes.ORDERED,
-			Counterparty: channeltypes.Counterparty{
-				PortId:    "super",
-				ChannelId: "duper",
-			},
-			ConnectionHops: []string{"no-more"},
-			Version:        "closedVersion",
-			PortId:         "closedPortID",
-			ChannelId:      "closedChannelID",
-		},
-	}
 	specs := map[string]struct {
 		srcQuery      *wasmvmtypes.IBCQuery
 		wasmKeeper    *mockWasmQueryKeeper
@@ -97,88 +49,12 @@ func TestIBCQuerier(t *testing.T) {
 				PortID: &wasmvmtypes.PortIDQuery{},
 			},
 			wasmKeeper: &mockWasmQueryKeeper{
-				GetContractInfoFn: func(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
+				GetContractInfoFn: func(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
 					return &types.ContractInfo{IBCPortID: "myIBCPortID"}
 				},
 			},
 			channelKeeper: &wasmtesting.MockChannelKeeper{},
 			expJSONResult: `{"port_id":"myIBCPortID"}`,
-		},
-		"query list channels - all": {
-			srcQuery: &wasmvmtypes.IBCQuery{
-				ListChannels: &wasmvmtypes.ListChannelsQuery{},
-			},
-			channelKeeper: &wasmtesting.MockChannelKeeper{
-				IterateChannelsFn: wasmtesting.MockChannelKeeperIterator(myExampleChannels),
-			},
-			expJSONResult: `{
-  "channels": [
-    {
-      "endpoint": {
-        "port_id": "myPortID",
-        "channel_id": "myChannelID"
-      },
-      "counterparty_endpoint": {
-        "port_id": "counterPartyPortID",
-        "channel_id": "counterPartyChannelID"
-      },
-      "order": "ORDER_ORDERED",
-      "version": "v1",
-      "connection_id": "one"
-    },
-    {
-      "endpoint": {
-        "port_id": "otherPortID",
-        "channel_id": "otherChannelID"
-      },
-      "counterparty_endpoint": {
-        "port_id": "otherCounterPartyPortID",
-        "channel_id": "otherCounterPartyChannelID"
-      },
-      "order": "ORDER_UNORDERED",
-      "version": "otherVersion",
-      "connection_id": "other"
-    }
-  ]
-}`,
-		},
-		"query list channels - filtered": {
-			srcQuery: &wasmvmtypes.IBCQuery{
-				ListChannels: &wasmvmtypes.ListChannelsQuery{
-					PortID: "otherPortID",
-				},
-			},
-			channelKeeper: &wasmtesting.MockChannelKeeper{
-				IterateChannelsFn: wasmtesting.MockChannelKeeperIterator(myExampleChannels),
-			},
-			expJSONResult: `{
-  "channels": [
-    {
-      "endpoint": {
-        "port_id": "otherPortID",
-        "channel_id": "otherChannelID"
-      },
-      "counterparty_endpoint": {
-        "port_id": "otherCounterPartyPortID",
-        "channel_id": "otherCounterPartyChannelID"
-      },
-      "order": "ORDER_UNORDERED",
-      "version": "otherVersion",
-      "connection_id": "other"
-    }
-  ]
-}`,
-		},
-		"query list channels - filtered empty": {
-			srcQuery: &wasmvmtypes.IBCQuery{
-				ListChannels: &wasmvmtypes.ListChannelsQuery{
-					PortID: "none-existing",
-				},
-			},
-			channelKeeper: &wasmtesting.MockChannelKeeper{
-				IterateChannelsFn: wasmtesting.MockChannelKeeperIterator(myExampleChannels),
-			},
-			expJSONResult: `{"channels": []}`,
 		},
 		"query channel": {
 			srcQuery: &wasmvmtypes.IBCQuery{
@@ -224,7 +100,7 @@ func TestIBCQuerier(t *testing.T) {
 				},
 			},
 			wasmKeeper: &mockWasmQueryKeeper{
-				GetContractInfoFn: func(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
+				GetContractInfoFn: func(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
 					return &types.ContractInfo{IBCPortID: "myLoadedPortID"}
 				},
 			},
@@ -332,8 +208,8 @@ func TestIBCQuerier(t *testing.T) {
 }
 
 func TestBankQuerierBalance(t *testing.T) {
-	mock := bankKeeperMock{GetBalanceFn: func(ctx sdk.Context, addr sdk.AccAddress, denom string) sdk.Coin {
-		return sdk.NewCoin(denom, sdk.NewInt(1))
+	mock := bankKeeperMock{GetBalanceFn: func(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
+		return sdk.NewCoin(denom, sdkmath.NewInt(1))
 	}}
 
 	ctx := sdk.Context{}
@@ -356,6 +232,190 @@ func TestBankQuerierBalance(t *testing.T) {
 	assert.Equal(t, exp, got)
 }
 
+func TestBankQuerierMetadata(t *testing.T) {
+	metadata := banktypes.Metadata{
+		Name: "Test Token",
+		Base: "utest",
+		DenomUnits: []*banktypes.DenomUnit{
+			{
+				Denom:    "utest",
+				Exponent: 0,
+				Aliases:  []string{},
+			},
+		},
+	}
+
+	mock := bankKeeperMock{GetDenomMetadataFn: func(ctx context.Context, denom string) (banktypes.Metadata, bool) {
+		if denom == "utest" {
+			return metadata, true
+		} else {
+			return banktypes.Metadata{}, false
+		}
+	}}
+
+	ctx := sdk.Context{}
+	q := keeper.BankQuerier(mock)
+	gotBz, gotErr := q(ctx, &wasmvmtypes.BankQuery{
+		DenomMetadata: &wasmvmtypes.DenomMetadataQuery{
+			Denom: "utest",
+		},
+	})
+	require.NoError(t, gotErr)
+	var got wasmvmtypes.DenomMetadataResponse
+	require.NoError(t, json.Unmarshal(gotBz, &got))
+	exp := wasmvmtypes.DenomMetadata{
+		Name: "Test Token",
+		Base: "utest",
+		DenomUnits: []wasmvmtypes.DenomUnit{
+			{
+				Denom:    "utest",
+				Exponent: 0,
+				Aliases:  []string{},
+			},
+		},
+	}
+	assert.Equal(t, exp, got.Metadata)
+
+	_, gotErr2 := q(ctx, &wasmvmtypes.BankQuery{
+		DenomMetadata: &wasmvmtypes.DenomMetadataQuery{
+			Denom: "uatom",
+		},
+	})
+	require.Error(t, gotErr2)
+	assert.Contains(t, gotErr2.Error(), "uatom: not found")
+}
+
+func TestBankQuerierMetadataWithNilAliases(t *testing.T) {
+	metadata := banktypes.Metadata{
+		Name: "Test Token",
+		Base: "utest",
+		DenomUnits: []*banktypes.DenomUnit{
+			{
+				Denom:    "utest",
+				Exponent: 0,
+				Aliases:  nil,
+			},
+		},
+	}
+
+	mock := bankKeeperMock{GetDenomMetadataFn: func(ctx context.Context, denom string) (banktypes.Metadata, bool) {
+		if denom == "utest" {
+			return metadata, true
+		} else {
+			return banktypes.Metadata{}, false
+		}
+	}}
+
+	ctx := sdk.Context{}
+	q := keeper.BankQuerier(mock)
+	gotBz, gotErr := q(ctx, &wasmvmtypes.BankQuery{
+		DenomMetadata: &wasmvmtypes.DenomMetadataQuery{
+			Denom: "utest",
+		},
+	})
+	require.NoError(t, gotErr)
+	var got wasmvmtypes.DenomMetadataResponse
+	require.NoError(t, json.Unmarshal(gotBz, &got))
+	exp := wasmvmtypes.DenomMetadata{
+		Name: "Test Token",
+		Base: "utest",
+		DenomUnits: []wasmvmtypes.DenomUnit{
+			{
+				Denom:    "utest",
+				Exponent: 0,
+				Aliases:  []string{},
+			},
+		},
+	}
+	assert.Equal(t, exp, got.Metadata)
+
+	_, gotErr2 := q(ctx, &wasmvmtypes.BankQuery{
+		DenomMetadata: &wasmvmtypes.DenomMetadataQuery{
+			Denom: "uatom",
+		},
+	})
+	require.Error(t, gotErr2)
+	assert.Contains(t, gotErr2.Error(), "uatom: not found")
+}
+
+func TestBankQuerierAllMetadata(t *testing.T) {
+	metadata := []banktypes.Metadata{
+		{
+			Name: "Test Token",
+			Base: "utest",
+			DenomUnits: []*banktypes.DenomUnit{
+				{
+					Denom:    "utest",
+					Exponent: 0,
+					Aliases:  []string{},
+				},
+			},
+		},
+	}
+
+	mock := bankKeeperMock{GetDenomsMetadataFn: func(ctx context.Context, req *banktypes.QueryDenomsMetadataRequest) (*banktypes.QueryDenomsMetadataResponse, error) {
+		return &banktypes.QueryDenomsMetadataResponse{
+			Metadatas:  metadata,
+			Pagination: &query.PageResponse{},
+		}, nil
+	}}
+
+	ctx := sdk.Context{}
+	q := keeper.BankQuerier(mock)
+	gotBz, gotErr := q(ctx, &wasmvmtypes.BankQuery{
+		AllDenomMetadata: &wasmvmtypes.AllDenomMetadataQuery{},
+	})
+	require.NoError(t, gotErr)
+	var got wasmvmtypes.AllDenomMetadataResponse
+	require.NoError(t, json.Unmarshal(gotBz, &got))
+	exp := wasmvmtypes.AllDenomMetadataResponse{
+		Metadata: []wasmvmtypes.DenomMetadata{
+			{
+				Name: "Test Token",
+				Base: "utest",
+				DenomUnits: []wasmvmtypes.DenomUnit{
+					{
+						Denom:    "utest",
+						Exponent: 0,
+						Aliases:  []string{},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, exp, got)
+}
+
+func TestBankQuerierAllMetadataPagination(t *testing.T) {
+	var capturedPagination *query.PageRequest
+	mock := bankKeeperMock{GetDenomsMetadataFn: func(ctx context.Context, req *banktypes.QueryDenomsMetadataRequest) (*banktypes.QueryDenomsMetadataResponse, error) {
+		capturedPagination = req.Pagination
+		return &banktypes.QueryDenomsMetadataResponse{
+			Metadatas: []banktypes.Metadata{},
+			Pagination: &query.PageResponse{
+				NextKey: nil,
+			},
+		}, nil
+	}}
+
+	ctx := sdk.Context{}
+	q := keeper.BankQuerier(mock)
+	_, gotErr := q(ctx, &wasmvmtypes.BankQuery{
+		AllDenomMetadata: &wasmvmtypes.AllDenomMetadataQuery{
+			Pagination: &wasmvmtypes.PageRequest{
+				Key:   []byte("key"),
+				Limit: 10,
+			},
+		},
+	})
+	require.NoError(t, gotErr)
+	exp := &query.PageRequest{
+		Key:   []byte("key"),
+		Limit: 10,
+	}
+	assert.Equal(t, exp, capturedPagination)
+}
+
 func TestContractInfoWasmQuerier(t *testing.T) {
 	myValidContractAddr := keeper.RandomBech32AccountAddress(t)
 	myCreatorAddr := keeper.RandomBech32AccountAddress(t)
@@ -373,13 +433,13 @@ func TestContractInfoWasmQuerier(t *testing.T) {
 				ContractInfo: &wasmvmtypes.ContractInfoQuery{ContractAddr: myValidContractAddr},
 			},
 			mock: mockWasmQueryKeeper{
-				GetContractInfoFn: func(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
+				GetContractInfoFn: func(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
 					val := types.ContractInfoFixture(func(i *types.ContractInfo) {
 						i.Admin, i.Creator, i.IBCPortID = myAdminAddr, myCreatorAddr, "myIBCPort"
 					})
 					return &val
 				},
-				IsPinnedCodeFn: func(ctx sdk.Context, codeID uint64) bool { return true },
+				IsPinnedCodeFn: func(ctx context.Context, codeID uint64) bool { return true },
 			},
 			expRes: wasmvmtypes.ContractInfoResponse{
 				CodeID:  1,
@@ -399,7 +459,7 @@ func TestContractInfoWasmQuerier(t *testing.T) {
 			req: &wasmvmtypes.WasmQuery{
 				ContractInfo: &wasmvmtypes.ContractInfoQuery{ContractAddr: myValidContractAddr},
 			},
-			mock: mockWasmQueryKeeper{GetContractInfoFn: func(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
+			mock: mockWasmQueryKeeper{GetContractInfoFn: func(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
 				return nil
 			}},
 			expErr: true,
@@ -409,13 +469,13 @@ func TestContractInfoWasmQuerier(t *testing.T) {
 				ContractInfo: &wasmvmtypes.ContractInfoQuery{ContractAddr: myValidContractAddr},
 			},
 			mock: mockWasmQueryKeeper{
-				GetContractInfoFn: func(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
+				GetContractInfoFn: func(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
 					val := types.ContractInfoFixture(func(i *types.ContractInfo) {
 						i.Admin, i.Creator = myAdminAddr, myCreatorAddr
 					})
 					return &val
 				},
-				IsPinnedCodeFn: func(ctx sdk.Context, codeID uint64) bool { return false },
+				IsPinnedCodeFn: func(ctx context.Context, codeID uint64) bool { return false },
 			},
 			expRes: wasmvmtypes.ContractInfoResponse{
 				CodeID:  1,
@@ -429,13 +489,13 @@ func TestContractInfoWasmQuerier(t *testing.T) {
 				ContractInfo: &wasmvmtypes.ContractInfoQuery{ContractAddr: myValidContractAddr},
 			},
 			mock: mockWasmQueryKeeper{
-				GetContractInfoFn: func(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
+				GetContractInfoFn: func(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
 					val := types.ContractInfoFixture(func(i *types.ContractInfo) {
 						i.Creator = myCreatorAddr
 					})
 					return &val
 				},
-				IsPinnedCodeFn: func(ctx sdk.Context, codeID uint64) bool { return true },
+				IsPinnedCodeFn: func(ctx context.Context, codeID uint64) bool { return true },
 			},
 			expRes: wasmvmtypes.ContractInfoResponse{
 				CodeID:  1,
@@ -476,7 +536,7 @@ func TestCodeInfoWasmQuerier(t *testing.T) {
 				CodeInfo: &wasmvmtypes.CodeInfoQuery{CodeID: 1},
 			},
 			mock: mockWasmQueryKeeper{
-				GetCodeInfoFn: func(ctx sdk.Context, codeID uint64) *types.CodeInfo {
+				GetCodeInfoFn: func(ctx context.Context, codeID uint64) *types.CodeInfo {
 					return &types.CodeInfo{
 						CodeHash: myRawChecksum,
 						Creator:  myCreatorAddr,
@@ -504,7 +564,7 @@ func TestCodeInfoWasmQuerier(t *testing.T) {
 				CodeInfo: &wasmvmtypes.CodeInfoQuery{CodeID: 1},
 			},
 			mock: mockWasmQueryKeeper{
-				GetCodeInfoFn: func(ctx sdk.Context, codeID uint64) *types.CodeInfo {
+				GetCodeInfoFn: func(ctx context.Context, codeID uint64) *types.CodeInfo {
 					return nil
 				},
 			},
@@ -522,6 +582,97 @@ func TestCodeInfoWasmQuerier(t *testing.T) {
 			require.NoError(t, gotErr)
 			var gotRes wasmvmtypes.CodeInfoResponse
 			require.NoError(t, json.Unmarshal(gotBz, &gotRes), string(gotBz))
+			assert.Equal(t, spec.expRes, gotRes)
+		})
+	}
+}
+
+func TestRawRangeWasmQuerier(t *testing.T) {
+	myValidContractAddr := keeper.RandomBech32AccountAddress(t)
+	validResponse := wasmvmtypes.RawRangeResponse{
+		Data: []wasmvmtypes.RawRangeEntry{
+			{
+				Key:   []byte("key1"),
+				Value: []byte("value"),
+			},
+		},
+		NextKey: nil,
+	}
+	var ctx sdk.Context
+	specs := map[string]struct {
+		req    *wasmvmtypes.WasmQuery
+		mock   mockWasmQueryKeeper
+		expRes wasmvmtypes.RawRangeResponse
+		expErr bool
+	}{
+		"all good": {
+			req: &wasmvmtypes.WasmQuery{
+				RawRange: &wasmvmtypes.RawRangeQuery{
+					ContractAddr: myValidContractAddr,
+					Start:        []byte("key0"),
+					End:          []byte("key2"),
+					Limit:        10,
+					Order:        "ascending",
+				},
+			},
+			mock: mockWasmQueryKeeper{
+				QueryRawRangeFn: func(ctx context.Context, contractAddress sdk.AccAddress, start, end []byte, limit uint16, reverse bool) (results []wasmvmtypes.RawRangeEntry, nextKey []byte) {
+					return validResponse.Data, validResponse.NextKey
+				},
+			},
+			expRes: validResponse,
+		},
+		"all good - descending": {
+			req: &wasmvmtypes.WasmQuery{
+				RawRange: &wasmvmtypes.RawRangeQuery{
+					ContractAddr: myValidContractAddr,
+					Start:        []byte("start"),
+					End:          []byte("end"),
+					Limit:        10,
+					Order:        "descending",
+				},
+			},
+			mock: mockWasmQueryKeeper{
+				QueryRawRangeFn: func(ctx context.Context, contractAddress sdk.AccAddress, start, end []byte, limit uint16, reverse bool) (results []wasmvmtypes.RawRangeEntry, nextKey []byte) {
+					return []wasmvmtypes.RawRangeEntry{}, nil
+				},
+			},
+			expRes: wasmvmtypes.RawRangeResponse{
+				Data:    []wasmvmtypes.RawRangeEntry{},
+				NextKey: nil,
+			},
+		},
+		"invalid addr": {
+			req: &wasmvmtypes.WasmQuery{
+				RawRange: &wasmvmtypes.RawRangeQuery{
+					ContractAddr: "not a valid addr",
+					Order:        "ascending",
+				},
+			},
+			expErr: true,
+		},
+		"invalid order": {
+			req: &wasmvmtypes.WasmQuery{
+				RawRange: &wasmvmtypes.RawRangeQuery{
+					ContractAddr: myValidContractAddr,
+					Order:        "not a valid order",
+				},
+			},
+			expErr: true,
+		},
+	}
+
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			q := keeper.WasmQuerier(spec.mock)
+			gotBz, gotErr := q(ctx, spec.req)
+			if spec.expErr {
+				require.Error(t, gotErr)
+				return
+			}
+			require.NoError(t, gotErr)
+			var gotRes wasmvmtypes.RawRangeResponse
+			require.NoError(t, json.Unmarshal(gotBz, &gotRes))
 			assert.Equal(t, spec.expRes, gotRes)
 		})
 	}
@@ -555,117 +706,60 @@ func TestQueryErrors(t *testing.T) {
 			mock := keeper.WasmVMQueryHandlerFn(func(ctx sdk.Context, caller sdk.AccAddress, request wasmvmtypes.QueryRequest) ([]byte, error) {
 				return nil, spec.src
 			})
-			ctx := sdk.Context{}.WithGasMeter(sdk.NewInfiniteGasMeter()).WithMultiStore(store.NewCommitMultiStore(dbm.NewMemDB()))
-			q := keeper.NewQueryHandler(ctx, mock, sdk.AccAddress{}, keeper.NewDefaultWasmGasRegister())
+			ms := store.NewCommitMultiStore(dbm.NewMemDB(), log.NewTestLogger(t), storemetrics.NewNoOpMetrics())
+			ctx := sdk.NewContext(ms, cmtproto.Header{}, false, log.NewTestLogger(t)).WithGasMeter(storetypes.NewInfiniteGasMeter())
+			q := keeper.NewQueryHandler(ctx, mock, sdk.AccAddress{}, types.NewDefaultWasmGasRegister())
 			_, gotErr := q.Query(wasmvmtypes.QueryRequest{}, 1)
 			assert.Equal(t, spec.expErr, gotErr)
 		})
 	}
 }
 
-func TestAcceptListStargateQuerier(t *testing.T) {
-	wasmApp := app.SetupWithEmptyStore(t)
-	ctx := wasmApp.NewUncachedContext(false, tmproto.Header{ChainID: "foo", Height: 1, Time: time.Now()})
-	err := wasmApp.StakingKeeper.SetParams(ctx, stakingtypes.DefaultParams())
-	require.NoError(t, err)
-
-	addrs := app.AddTestAddrsIncremental(wasmApp, ctx, 2, sdk.NewInt(1_000_000))
-	accepted := keeper.AcceptedStargateQueries{
-		"/cosmos.auth.v1beta1.Query/Account": &authtypes.QueryAccountResponse{},
-		"/no/route/to/this":                  &authtypes.QueryAccountResponse{},
-	}
-
-	marshal := func(pb proto.Message) []byte {
-		b, err := proto.Marshal(pb)
-		require.NoError(t, err)
-		return b
-	}
-
-	specs := map[string]struct {
-		req     *wasmvmtypes.StargateQuery
-		expErr  bool
-		expResp string
-	}{
-		"in accept list - success result": {
-			req: &wasmvmtypes.StargateQuery{
-				Path: "/cosmos.auth.v1beta1.Query/Account",
-				Data: marshal(&authtypes.QueryAccountRequest{Address: addrs[0].String()}),
-			},
-			expResp: fmt.Sprintf(`{"account":{"@type":"/cosmos.auth.v1beta1.BaseAccount","address":%q,"pub_key":null,"account_number":"1","sequence":"0"}}`, addrs[0].String()),
-		},
-		"in accept list - error result": {
-			req: &wasmvmtypes.StargateQuery{
-				Path: "/cosmos.auth.v1beta1.Query/Account",
-				Data: marshal(&authtypes.QueryAccountRequest{Address: sdk.AccAddress(ed25519.GenPrivKey().PubKey().Address()).String()}),
-			},
-			expErr: true,
-		},
-		"not in accept list": {
-			req: &wasmvmtypes.StargateQuery{
-				Path: "/cosmos.bank.v1beta1.Query/AllBalances",
-				Data: marshal(&banktypes.QueryAllBalancesRequest{Address: addrs[0].String()}),
-			},
-			expErr: true,
-		},
-		"unknown route": {
-			req: &wasmvmtypes.StargateQuery{
-				Path: "/no/route/to/this",
-				Data: marshal(&banktypes.QueryAllBalancesRequest{Address: addrs[0].String()}),
-			},
-			expErr: true,
-		},
-	}
-	for name, spec := range specs {
-		t.Run(name, func(t *testing.T) {
-			q := keeper.AcceptListStargateQuerier(accepted, wasmApp.GRPCQueryRouter(), wasmApp.AppCodec())
-			gotBz, gotErr := q(ctx, spec.req)
-			if spec.expErr {
-				require.Error(t, gotErr)
-				return
-			}
-			require.NoError(t, gotErr)
-			assert.JSONEq(t, spec.expResp, string(gotBz), string(gotBz))
-		})
-	}
-}
-
 type mockWasmQueryKeeper struct {
-	GetContractInfoFn func(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo
-	QueryRawFn        func(ctx sdk.Context, contractAddress sdk.AccAddress, key []byte) []byte
-	QuerySmartFn      func(ctx sdk.Context, contractAddr sdk.AccAddress, req types.RawContractMessage) ([]byte, error)
-	IsPinnedCodeFn    func(ctx sdk.Context, codeID uint64) bool
-	GetCodeInfoFn     func(ctx sdk.Context, codeID uint64) *types.CodeInfo
+	GetContractInfoFn func(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo
+	QueryRawFn        func(ctx context.Context, contractAddress sdk.AccAddress, key []byte) []byte
+	QuerySmartFn      func(ctx context.Context, contractAddr sdk.AccAddress, req types.RawContractMessage) ([]byte, error)
+	QueryRawRangeFn   func(ctx context.Context, contractAddress sdk.AccAddress, start, end []byte, limit uint16, reverse bool) (results []wasmvmtypes.RawRangeEntry, nextKey []byte)
+	IsPinnedCodeFn    func(ctx context.Context, codeID uint64) bool
+	GetCodeInfoFn     func(ctx context.Context, codeID uint64) *types.CodeInfo
 }
 
-func (m mockWasmQueryKeeper) GetContractInfo(ctx sdk.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
+func (m mockWasmQueryKeeper) GetContractInfo(ctx context.Context, contractAddress sdk.AccAddress) *types.ContractInfo {
 	if m.GetContractInfoFn == nil {
 		panic("not expected to be called")
 	}
 	return m.GetContractInfoFn(ctx, contractAddress)
 }
 
-func (m mockWasmQueryKeeper) QueryRaw(ctx sdk.Context, contractAddress sdk.AccAddress, key []byte) []byte {
+func (m mockWasmQueryKeeper) QueryRaw(ctx context.Context, contractAddress sdk.AccAddress, key []byte) []byte {
 	if m.QueryRawFn == nil {
 		panic("not expected to be called")
 	}
 	return m.QueryRawFn(ctx, contractAddress, key)
 }
 
-func (m mockWasmQueryKeeper) QuerySmart(ctx sdk.Context, contractAddr sdk.AccAddress, req []byte) ([]byte, error) {
+func (m mockWasmQueryKeeper) QueryRawRange(ctx context.Context, contractAddress sdk.AccAddress, start, end []byte, limit uint16, reverse bool) (results []wasmvmtypes.RawRangeEntry, nextKey []byte) {
+	if m.QueryRawRangeFn == nil {
+		panic("not expected to be called")
+	}
+	return m.QueryRawRangeFn(ctx, contractAddress, start, end, limit, reverse)
+}
+
+func (m mockWasmQueryKeeper) QuerySmart(ctx context.Context, contractAddr sdk.AccAddress, req []byte) ([]byte, error) {
 	if m.QuerySmartFn == nil {
 		panic("not expected to be called")
 	}
 	return m.QuerySmartFn(ctx, contractAddr, req)
 }
 
-func (m mockWasmQueryKeeper) IsPinnedCode(ctx sdk.Context, codeID uint64) bool {
+func (m mockWasmQueryKeeper) IsPinnedCode(ctx context.Context, codeID uint64) bool {
 	if m.IsPinnedCodeFn == nil {
 		panic("not expected to be called")
 	}
 	return m.IsPinnedCodeFn(ctx, codeID)
 }
 
-func (m mockWasmQueryKeeper) GetCodeInfo(ctx sdk.Context, codeID uint64) *types.CodeInfo {
+func (m mockWasmQueryKeeper) GetCodeInfo(ctx context.Context, codeID uint64) *types.CodeInfo {
 	if m.GetCodeInfoFn == nil {
 		panic("not expected to be called")
 	}
@@ -673,179 +767,186 @@ func (m mockWasmQueryKeeper) GetCodeInfo(ctx sdk.Context, codeID uint64) *types.
 }
 
 type bankKeeperMock struct {
-	GetSupplyFn      func(ctx sdk.Context, denom string) sdk.Coin
-	GetBalanceFn     func(ctx sdk.Context, addr sdk.AccAddress, denom string) sdk.Coin
-	GetAllBalancesFn func(ctx sdk.Context, addr sdk.AccAddress) sdk.Coins
+	GetSupplyFn         func(ctx context.Context, denom string) sdk.Coin
+	GetBalanceFn        func(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin
+	GetAllBalancesFn    func(ctx context.Context, addr sdk.AccAddress) sdk.Coins
+	GetDenomMetadataFn  func(ctx context.Context, denom string) (banktypes.Metadata, bool)
+	GetDenomsMetadataFn func(ctx context.Context, req *banktypes.QueryDenomsMetadataRequest) (*banktypes.QueryDenomsMetadataResponse, error)
 }
 
-func (m bankKeeperMock) GetSupply(ctx sdk.Context, denom string) sdk.Coin {
+func (m bankKeeperMock) GetSupply(ctx context.Context, denom string) sdk.Coin {
 	if m.GetSupplyFn == nil {
 		panic("not expected to be called")
 	}
 	return m.GetSupplyFn(ctx, denom)
 }
 
-func (m bankKeeperMock) GetBalance(ctx sdk.Context, addr sdk.AccAddress, denom string) sdk.Coin {
+func (m bankKeeperMock) GetBalance(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
 	if m.GetBalanceFn == nil {
 		panic("not expected to be called")
 	}
 	return m.GetBalanceFn(ctx, addr, denom)
 }
 
-func (m bankKeeperMock) GetAllBalances(ctx sdk.Context, addr sdk.AccAddress) sdk.Coins {
+func (m bankKeeperMock) GetAllBalances(ctx context.Context, addr sdk.AccAddress) sdk.Coins {
 	if m.GetAllBalancesFn == nil {
 		panic("not expected to be called")
 	}
 	return m.GetAllBalancesFn(ctx, addr)
 }
 
-func TestConvertProtoToJSONMarshal(t *testing.T) {
-	testCases := []struct {
-		name                  string
-		queryPath             string
-		protoResponseStruct   codec.ProtoMarshaler
-		originalResponse      string
-		expectedProtoResponse codec.ProtoMarshaler
-		expectedError         bool
+func (m bankKeeperMock) GetDenomMetaData(ctx context.Context, denom string) (banktypes.Metadata, bool) {
+	if m.GetDenomMetadataFn == nil {
+		panic("not expected to be called")
+	}
+	return m.GetDenomMetadataFn(ctx, denom)
+}
+
+func (m bankKeeperMock) DenomsMetadata(ctx context.Context, req *banktypes.QueryDenomsMetadataRequest) (*banktypes.QueryDenomsMetadataResponse, error) {
+	if m.GetDenomsMetadataFn == nil {
+		panic("not expected to be called")
+	}
+	return m.GetDenomsMetadataFn(ctx, req)
+}
+
+func TestConvertSDKDecCoinToWasmDecCoin(t *testing.T) {
+	specs := map[string]struct {
+		src sdk.DecCoins
+		exp []wasmvmtypes.DecCoin
 	}{
-		{
-			name:                "successful conversion from proto response to json marshalled response",
-			queryPath:           "/cosmos.bank.v1beta1.Query/AllBalances",
-			originalResponse:    "0a090a036261721202333012050a03666f6f",
-			protoResponseStruct: &banktypes.QueryAllBalancesResponse{},
-			expectedProtoResponse: &banktypes.QueryAllBalancesResponse{
-				Balances: sdk.NewCoins(sdk.NewCoin("bar", sdk.NewInt(30))),
-				Pagination: &query.PageResponse{
-					NextKey: []byte("foo"),
-				},
-			},
+		"one coin": {
+			src: sdk.NewDecCoins(sdk.NewInt64DecCoin("alx", 1)),
+			exp: []wasmvmtypes.DecCoin{{Amount: "1.000000000000000000", Denom: "alx"}},
 		},
-		{
-			name:                "invalid proto response struct",
-			queryPath:           "/cosmos.bank.v1beta1.Query/AllBalances",
-			originalResponse:    "0a090a036261721202333012050a03666f6f",
-			protoResponseStruct: &authtypes.QueryAccountResponse{},
-			expectedError:       true,
+		"multiple coins": {
+			src: sdk.NewDecCoins(sdk.NewInt64DecCoin("alx", 1), sdk.NewInt64DecCoin("blx", 2)),
+			exp: []wasmvmtypes.DecCoin{{Amount: "1.000000000000000000", Denom: "alx"}, {Amount: "2.000000000000000000", Denom: "blx"}},
+		},
+		"small amount": {
+			src: sdk.NewDecCoins(sdk.NewDecCoinFromDec("alx", sdkmath.LegacyNewDecWithPrec(1, 18))),
+			exp: []wasmvmtypes.DecCoin{{Amount: "0.000000000000000001", Denom: "alx"}},
+		},
+		"big amount": {
+			src: sdk.NewDecCoins(sdk.NewDecCoin("alx", sdkmath.NewIntFromUint64(math.MaxUint64))),
+			exp: []wasmvmtypes.DecCoin{{Amount: "18446744073709551615.000000000000000000", Denom: "alx"}},
+		},
+		"empty": {
+			src: sdk.NewDecCoins(),
+			exp: []wasmvmtypes.DecCoin{},
+		},
+		"nil": {
+			exp: []wasmvmtypes.DecCoin{},
 		},
 	}
-
-	for _, tc := range testCases {
-		t.Run(fmt.Sprintf("Case %s", tc.name), func(t *testing.T) {
-			originalVersionBz, err := hex.DecodeString(tc.originalResponse)
-			require.NoError(t, err)
-			appCodec := app.MakeEncodingConfig().Marshaler
-
-			jsonMarshalledResponse, err := keeper.ConvertProtoToJSONMarshal(appCodec, tc.protoResponseStruct, originalVersionBz)
-			if tc.expectedError {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-
-			// check response by json marshalling proto response into json response manually
-			jsonMarshalExpectedResponse, err := appCodec.MarshalJSON(tc.expectedProtoResponse)
-			require.NoError(t, err)
-			require.JSONEq(t, string(jsonMarshalledResponse), string(jsonMarshalExpectedResponse))
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			got := keeper.ConvertSDKDecCoinsToWasmDecCoins(spec.src)
+			assert.Equal(t, spec.exp, got)
 		})
 	}
 }
 
-func TestResetProtoMarshalerAfterJsonMarshal(t *testing.T) {
-	appCodec := app.MakeEncodingConfig().Marshaler
+var _ keeper.GRPCQueryRouter = mockedQueryRouter{}
 
-	protoMarshaler := &banktypes.QueryAllBalancesResponse{}
-	expected := appCodec.MustMarshalJSON(&banktypes.QueryAllBalancesResponse{
-		Balances: sdk.NewCoins(sdk.NewCoin("bar", sdk.NewInt(30))),
-		Pagination: &query.PageResponse{
-			NextKey: []byte("foo"),
-		},
-	})
-
-	bz, err := hex.DecodeString("0a090a036261721202333012050a03666f6f")
-	require.NoError(t, err)
-
-	// first marshal
-	response, err := keeper.ConvertProtoToJSONMarshal(appCodec, protoMarshaler, bz)
-	require.NoError(t, err)
-	require.Equal(t, expected, response)
-
-	// second marshal
-	response, err = keeper.ConvertProtoToJSONMarshal(appCodec, protoMarshaler, bz)
-	require.NoError(t, err)
-	require.Equal(t, expected, response)
+type mockedQueryRouter struct {
+	codec codec.Codec
 }
 
-// TestDeterministicJsonMarshal tests that we get deterministic JSON marshalled response upon
-// proto struct update in the state machine.
-func TestDeterministicJsonMarshal(t *testing.T) {
-	testCases := []struct {
-		name                string
-		originalResponse    string
-		updatedResponse     string
-		queryPath           string
-		responseProtoStruct codec.ProtoMarshaler
-		expectedProto       func() codec.ProtoMarshaler
-	}{
-		/**
-		   *
-		   * Origin Response
-		   * 0a530a202f636f736d6f732e617574682e763162657461312e426173654163636f756e74122f0a2d636f736d6f7331346c3268686a6e676c3939367772703935673867646a6871653038326375367a7732706c686b
-		   *
-		   * Updated Response
-		   * 0a530a202f636f736d6f732e617574682e763162657461312e426173654163636f756e74122f0a2d636f736d6f7331646a783375676866736d6b6135386676673076616a6e6533766c72776b7a6a346e6377747271122d636f736d6f7331646a783375676866736d6b6135386676673076616a6e6533766c72776b7a6a346e6377747271
-		  // Origin proto
-		  message QueryAccountResponse {
-		    // account defines the account of the corresponding address.
-		    google.protobuf.Any account = 1 [(cosmos_proto.accepts_interface) = "AccountI"];
-		  }
-		  // Updated proto
-		  message QueryAccountResponse {
-		    // account defines the account of the corresponding address.
-		    google.protobuf.Any account = 1 [(cosmos_proto.accepts_interface) = "AccountI"];
-		    // address is the address to query for.
-		  	string address = 2;
-		  }
-		*/
-		{
-			"Query Account",
-			"0a530a202f636f736d6f732e617574682e763162657461312e426173654163636f756e74122f0a2d636f736d6f733166387578756c746e3873717a687a6e72737a3371373778776171756867727367366a79766679",
-			"0a530a202f636f736d6f732e617574682e763162657461312e426173654163636f756e74122f0a2d636f736d6f733166387578756c746e3873717a687a6e72737a3371373778776171756867727367366a79766679122d636f736d6f733166387578756c746e3873717a687a6e72737a3371373778776171756867727367366a79766679",
-			"/cosmos.auth.v1beta1.Query/Account",
-			&authtypes.QueryAccountResponse{},
-			func() codec.ProtoMarshaler {
-				account := authtypes.BaseAccount{
-					Address: "cosmos1f8uxultn8sqzhznrsz3q77xwaquhgrsg6jyvfy",
-				}
-				accountResponse, err := codectypes.NewAnyWithValue(&account)
-				require.NoError(t, err)
-				return &authtypes.QueryAccountResponse{
-					Account: accountResponse,
-				}
-			},
-		},
+func (m mockedQueryRouter) Route(_ string) baseapp.GRPCQueryHandler {
+	return func(ctx sdk.Context, req *abci.RequestQuery) (*abci.ResponseQuery, error) {
+		balanceReq := &banktypes.QueryBalanceRequest{}
+		if err := m.codec.Unmarshal(req.Data, balanceReq); err != nil {
+			return nil, err
+		}
+
+		coin := sdk.NewInt64Coin(balanceReq.Denom, 1)
+		balanceRes := &banktypes.QueryBalanceResponse{
+			Balance: &coin,
+		}
+
+		resValue, err := m.codec.Marshal(balanceRes)
+		if err != nil {
+			return nil, err
+		}
+
+		return &abci.ResponseQuery{
+			Value: resValue,
+		}, nil
+	}
+}
+
+func TestGRPCQuerier(t *testing.T) {
+	const (
+		denom1 = "denom1"
+		denom2 = "denom2"
+	)
+	_, keepers := keeper.CreateTestInput(t, false, keeper.AvailableCapabilities)
+	cdc := keepers.EncodingConfig.Codec
+
+	acceptedQueries := keeper.AcceptedQueries{
+		"/bank.Balance": func() proto.Message { return &banktypes.QueryBalanceResponse{} },
 	}
 
-	for _, tc := range testCases {
-		t.Run(fmt.Sprintf("Case %s", tc.name), func(t *testing.T) {
-			appCodec := app.MakeEncodingConfig().Marshaler
-
-			originVersionBz, err := hex.DecodeString(tc.originalResponse)
-			require.NoError(t, err)
-			jsonMarshalledOriginalBz, err := keeper.ConvertProtoToJSONMarshal(appCodec, tc.responseProtoStruct, originVersionBz)
-			require.NoError(t, err)
-
-			newVersionBz, err := hex.DecodeString(tc.updatedResponse)
-			require.NoError(t, err)
-			jsonMarshalledUpdatedBz, err := keeper.ConvertProtoToJSONMarshal(appCodec, tc.responseProtoStruct, newVersionBz)
-			require.NoError(t, err)
-
-			// json marshalled bytes should be the same since we use the same proto struct for unmarshalling
-			require.Equal(t, jsonMarshalledOriginalBz, jsonMarshalledUpdatedBz)
-
-			// raw build also make same result
-			jsonMarshalExpectedResponse, err := appCodec.MarshalJSON(tc.expectedProto())
-			require.NoError(t, err)
-			require.Equal(t, jsonMarshalledUpdatedBz, jsonMarshalExpectedResponse)
-		})
+	router := mockedQueryRouter{
+		codec: cdc,
 	}
+	querier := keeper.AcceptListStargateQuerier(acceptedQueries, router, keepers.EncodingConfig.Codec)
+
+	addr := keeper.RandomBech32AccountAddress(t)
+
+	eg := errgroup.Group{}
+	errorsCount := atomic.Uint64{}
+	for range 50 {
+		for _, denom := range []string{denom1, denom2} {
+			eg.Go(func() error {
+				queryReq := &banktypes.QueryBalanceRequest{
+					Address: addr,
+					Denom:   denom,
+				}
+				grpcData, err := cdc.Marshal(queryReq)
+				if err != nil {
+					return err
+				}
+
+				wasmGrpcReq := &wasmvmtypes.StargateQuery{
+					Data: grpcData,
+					Path: "/bank.Balance",
+				}
+
+				wasmGrpcRes, err := querier(sdk.Context{}, wasmGrpcReq)
+				if err != nil {
+					return err
+				}
+
+				queryRes := &banktypes.QueryBalanceResponse{}
+				if err := cdc.UnmarshalJSON(wasmGrpcRes, queryRes); err != nil {
+					return err
+				}
+
+				expectedCoin := sdk.NewInt64Coin(denom, 1)
+				if queryRes.Balance == nil {
+					fmt.Printf(
+						"Error: expected %s, got nil\n",
+						expectedCoin.String(),
+					)
+					errorsCount.Add(1)
+					return nil
+				}
+				if queryRes.Balance.String() != expectedCoin.String() {
+					fmt.Printf(
+						"Error: expected %s, got %s\n",
+						expectedCoin.String(),
+						queryRes.Balance.String(),
+					)
+					errorsCount.Add(1)
+					return nil
+				}
+
+				return nil
+			})
+		}
+	}
+
+	require.NoError(t, eg.Wait())
+	require.Zero(t, errorsCount.Load())
 }

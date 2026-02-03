@@ -2,13 +2,15 @@ package types
 
 import (
 	"encoding/json"
-	"fmt"
+	"slices"
 
-	errorsmod "cosmossdk.io/errors"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/gogoproto/jsonpb"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
+
+	errorsmod "cosmossdk.io/errors"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 var AllAccessTypes = []AccessType{
@@ -28,7 +30,7 @@ func (a AccessType) With(addrs ...sdk.AccAddress) AccessConfig {
 		for i, v := range addrs {
 			bech32Addrs[i] = v.String()
 		}
-		if err := assertValidAddresses(bech32Addrs); err != nil {
+		if err := validateBech32Addresses(bech32Addrs); err != nil {
 			panic(errorsmod.Wrap(err, "addresses"))
 		}
 		return AccessConfig{Permission: AccessTypeAnyOfAddresses, Addresses: bech32Addrs}
@@ -100,34 +102,20 @@ func (p Params) String() string {
 // ValidateBasic performs basic validation on wasm parameters
 func (p Params) ValidateBasic() error {
 	if err := validateAccessType(p.InstantiateDefaultPermission); err != nil {
-		return errors.Wrap(err, "instantiate default permission")
+		return errorsmod.Wrap(err, "instantiate default permission")
 	}
-	if err := validateAccessConfig(p.CodeUploadAccess); err != nil {
+	if err := p.CodeUploadAccess.ValidateBasic(); err != nil {
 		return errors.Wrap(err, "upload access")
 	}
 	return nil
 }
 
-func validateAccessConfig(i interface{}) error {
-	v, ok := i.(AccessConfig)
-	if !ok {
-		return fmt.Errorf("invalid parameter type: %T", i)
-	}
-	return v.ValidateBasic()
-}
-
-func validateAccessType(i interface{}) error {
-	a, ok := i.(AccessType)
-	if !ok {
-		return fmt.Errorf("invalid parameter type: %T", i)
-	}
+func validateAccessType(a AccessType) error {
 	if a == AccessTypeUnspecified {
 		return errorsmod.Wrap(ErrEmpty, "type")
 	}
-	for _, v := range AllAccessTypes {
-		if v == a {
-			return nil
-		}
+	if slices.Contains(AllAccessTypes, a) {
+		return nil
 	}
 	return errorsmod.Wrapf(ErrInvalid, "unknown type: %q", a)
 }
@@ -140,26 +128,9 @@ func (a AccessConfig) ValidateBasic() error {
 	case AccessTypeNobody, AccessTypeEverybody:
 		return nil
 	case AccessTypeAnyOfAddresses:
-		return errorsmod.Wrap(assertValidAddresses(a.Addresses), "addresses")
+		return errorsmod.Wrap(validateBech32Addresses(a.Addresses), "addresses")
 	}
 	return errorsmod.Wrapf(ErrInvalid, "unknown type: %q", a.Permission)
-}
-
-func assertValidAddresses(addrs []string) error {
-	if len(addrs) == 0 {
-		return ErrEmpty
-	}
-	idx := make(map[string]struct{}, len(addrs))
-	for _, a := range addrs {
-		if _, err := sdk.AccAddressFromBech32(a); err != nil {
-			return errorsmod.Wrapf(err, "address: %s", a)
-		}
-		if _, exists := idx[a]; exists {
-			return ErrDuplicate.Wrapf("address: %s", a)
-		}
-		idx[a] = struct{}{}
-	}
-	return nil
 }
 
 // Allowed returns if permission includes the actor.
@@ -171,12 +142,7 @@ func (a AccessConfig) Allowed(actor sdk.AccAddress) bool {
 	case AccessTypeEverybody:
 		return true
 	case AccessTypeAnyOfAddresses:
-		for _, v := range a.Addresses {
-			if v == actor.String() {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(a.Addresses, actor.String())
 	default:
 		panic("unknown type")
 	}

@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 
 	tmBytes "github.com/cometbft/cometbft/libs/bytes"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	fuzz "github.com/google/gofuzz"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
-var ModelFuzzers = []interface{}{FuzzAddr, FuzzAddrString, FuzzAbsoluteTxPosition, FuzzContractInfo, FuzzStateModel, FuzzAccessType, FuzzAccessConfig, FuzzContractCodeHistory}
+var ModelFuzzers = []any{FuzzAddr, FuzzAddrString, FuzzAbsoluteTxPosition, FuzzContractInfo, FuzzStateModel, FuzzAccessType, FuzzAccessConfig, FuzzContractCodeHistory}
 
 func FuzzAddr(m *sdk.AccAddress, c fuzz.Continue) {
 	*m = make([]byte, 20)

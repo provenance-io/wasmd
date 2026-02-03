@@ -2,7 +2,7 @@
 
 With stargate, we have access to the `x/upgrade` module, which we can use to perform
 inline upgrades. Please first read both the basic 
-[x/upgrade spec](https://github.com/cosmos/cosmos-sdk/blob/master/x/upgrade/spec/01_concepts.md)
+[x/upgrade spec](https://github.com/cosmos/cosmos-sdk/blob/31fdee0228bd6f3e787489c8e4434aabc8facb7d/x/upgrade/spec/01_concepts.md)
 and [go docs](https://godoc.org/github.com/cosmos/cosmos-sdk/x/upgrade#hdr-Performing_Upgrades)
 for the background on the module.
 
@@ -142,7 +142,7 @@ docker run --rm -it \
 
 ## Take majority control of the chain
 
-In genesis we have a valiator with 250 million `ustake` bonded. We want to be easily
+In genesis we have a validator with 250 million `ustake` bonded. We want to be easily
 able to pass a proposal with our client. Let us bond 700 million `ustake` to ensure
 we have > 67% of the voting power and will pass with the validator not voting.
 
@@ -167,14 +167,14 @@ docker run --rm -it \
 ## Vote on the upgrade
 
 Now that we see the chain is running and producing blocks, and our client has
-enough token to control the netwrok, let's create a governance
+enough token to control the network, let's create a governance
 upgrade proposal for the new chain to move to `musselnet-v2` (this must be the
 same name as we use in the handler we created above, change this to match what
 you put in your handler):
 
 ```sh
 # create the proposal
-# check the current height and add 100-200 or so for the upgrade time
+# check the current height and add 100-200 or so for the upgrade 
 # (the voting period is ~60 blocks)
 docker run --rm -it \
     --mount type=volume,source=musselnet_client,target=/root \
@@ -208,6 +208,79 @@ docker run --rm -it \
     query gov votes 1
 ```
 
+## Vote on the upgrade (Starting from wasmd v0.40.0)
+
+Starting from `v0.40.0` of `wasmd`, which incorporates cosmos-sdk `v0.47.x`,
+there have been changes in how upgrade proposals are handled. Below, 
+we provide an example of how to achieve the same outcome as described 
+in the preceding section.
+
+Please be aware that some commands have been replaced by an interactive 
+Command Line Interface (CLI), and the process of submitting a proposal 
+is now divided into two distinct steps: `proposal creation` and `proposal submission`.
+
+```sh
+# create the proposal
+docker run --rm -it \
+    --mount type=volume,source=musselnet_client,target=/root \
+    --network=host \
+    cosmwasm/wasmd:v0.40.0 wasmd \
+    tx gov draft-proposal \
+    --from validator --chain-id testing
+
+# choose <software-upgrade> from the interactive CLI and fill all the fields
+# of the generated json file draft_proposal.json
+# example:
+{
+ "messages": [
+  {
+   "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+   "authority": "wasm10d07y265gmmuvt4z0w9aw880jnsr700js7zslc",
+   "plan": {
+    "name": "Upgrade",
+    "height": "500",
+    "info": "",
+    "upgraded_client_state": null
+   }
+  }
+ ],
+ "metadata": "ipfs://CID",
+ "deposit": "100000ustake",
+ "title": "Upgrade",
+ "summary": "summary"
+}
+
+# submit the proposal
+docker run --rm -it \
+    --mount type=volume,source=musselnet_client,target=/root \
+    --network=host \
+    cosmwasm/wasmd:v0.40.0 wasmd \
+    tx gov submit-proposal draft_proposal.json \
+    --from validator --chain-id testing
+
+# make sure it looks good
+docker run --rm -it \
+    --mount type=volume,source=musselnet_client,target=/root \
+    --network=host \
+    cosmwasm/wasmd:v0.40.0 wasmd \
+    query gov proposal 1
+
+# vote for it
+docker run --rm -it \
+    --mount type=volume,source=musselnet_client,target=/root \
+    --network=host \
+    cosmwasm/wasmd:v0.40.0 wasmd \
+    tx gov vote 1 yes \
+    --from validator --chain-id testing
+
+# ensure vote was counted
+docker run --rm -it \
+    --mount type=volume,source=musselnet_client,target=/root \
+    --network=host \
+    cosmwasm/wasmd:v0.40.0 wasmd \
+    query gov votes 1
+```
+
 ## Swap out binaries
 
 Now, we just wait about 5 minutes for the vote to pass, and ensure it is passed:
@@ -224,7 +297,7 @@ docker run --rm -it \
 After this, we just let the chain run and open the terminal so you can see the log files.
 It should keep producing blocks until it hits height 500 (or whatever you set there),
 when the process will print a huge stacktrace and hang. Immediately before the stack trace, you
-should see a line like this (burried under tons of tendermint logs):
+should see a line like this (buried under tons of tendermint logs):
 
 `8:50PM ERR UPGRADE "musselnet-v2" NEEDED at height: 100:`
 
@@ -247,7 +320,7 @@ docker run --rm -it -p 26657:26657 -p 26656:26656 -p 1317:1317 \
 
 On a real network, operators will have to be awake when the upgrade plan is activated
 and manually perform this switch, or use some automated tooling like 
-[cosmosvisor](https://github.com/cosmos/cosmos-sdk/blob/master/cosmovisor/README.md).
+[cosmosvisor](https://github.com/cosmos/cosmos-sdk/blob/main/tools/cosmovisor/README.md).
 
 ## Check final state
 

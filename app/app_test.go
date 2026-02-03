@@ -1,33 +1,45 @@
 package app
 
 import (
-	"os"
 	"testing"
 
-	dbm "github.com/cometbft/cometbft-db"
-	"github.com/cometbft/cometbft/libs/log"
-	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/stretchr/testify/assert"
+	abci "github.com/cometbft/cometbft/abci/types"
+	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/gogoproto/proto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/CosmWasm/wasmd/x/wasm"
+	"cosmossdk.io/log"
+
+	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/msgservice"
+
+	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 )
 
-var emptyWasmOpts []wasm.Option
+var emptyWasmOpts []wasmkeeper.Option
 
 func TestWasmdExport(t *testing.T) {
 	db := dbm.NewMemDB()
+	logger := log.NewTestLogger(t)
 	gapp := NewWasmAppWithCustomOptions(t, false, SetupOptions{
-		Logger:  log.NewTMLogger(log.NewSyncWriter(os.Stdout)),
+		Logger:  logger.With("instance", "first"),
 		DB:      db,
 		AppOpts: simtestutil.NewAppOptionsWithFlagHome(t.TempDir()),
 	})
-	gapp.Commit()
+
+	// finalize block so we have CheckTx state set
+	_, err := gapp.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height: 1,
+	})
+	require.NoError(t, err)
+
+	_, err = gapp.Commit()
+	require.NoError(t, err)
 
 	// Making a new app object with the db, so that initchain hasn't been called
-	newGapp := NewWasmApp(log.NewTMLogger(log.NewSyncWriter(os.Stdout)), db, nil, true, wasm.EnableAllProposals, simtestutil.NewAppOptionsWithFlagHome(t.TempDir()), emptyWasmOpts)
-	_, err := newGapp.ExportAppStateAndValidators(false, []string{}, nil)
+	newGapp := NewWasmApp(logger, db, nil, true, simtestutil.NewAppOptionsWithFlagHome(t.TempDir()), emptyWasmOpts)
+	_, err = newGapp.ExportAppStateAndValidators(false, []string{}, nil)
 	require.NoError(t, err, "ExportAppStateAndValidators should not have an error")
 }
 
@@ -53,33 +65,17 @@ func TestGetMaccPerms(t *testing.T) {
 	require.Equal(t, maccPerms, dup, "duplicated module account permissions differed from actual module account permissions")
 }
 
-func TestGetEnabledProposals(t *testing.T) {
-	cases := map[string]struct {
-		proposalsEnabled string
-		specificEnabled  string
-		expected         []wasm.ProposalType
-	}{
-		"all disabled": {
-			proposalsEnabled: "false",
-			expected:         wasm.DisableAllProposals,
-		},
-		"all enabled": {
-			proposalsEnabled: "true",
-			expected:         wasm.EnableAllProposals,
-		},
-		"some enabled": {
-			proposalsEnabled: "okay",
-			specificEnabled:  "StoreCode,InstantiateContract",
-			expected:         []wasm.ProposalType{wasm.ProposalTypeStoreCode, wasm.ProposalTypeInstantiateContract},
-		},
-	}
+// TestMergedRegistry tests that fetching the gogo/protov2 merged registry
+// doesn't fail after loading all file descriptors.
+func TestMergedRegistry(t *testing.T) {
+	r, err := proto.MergedRegistry()
+	require.NoError(t, err)
+	require.Greater(t, r.NumFiles(), 0)
+}
 
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			ProposalsEnabled = tc.proposalsEnabled
-			EnableSpecificProposals = tc.specificEnabled
-			proposals := GetEnabledProposals()
-			assert.Equal(t, tc.expected, proposals)
-		})
-	}
+func TestProtoAnnotations(t *testing.T) {
+	r, err := proto.MergedRegistry()
+	require.NoError(t, err)
+	err = msgservice.ValidateProtoAnnotations(r)
+	require.NoError(t, err)
 }

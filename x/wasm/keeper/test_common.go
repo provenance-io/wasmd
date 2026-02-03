@@ -9,29 +9,42 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
-
-	icacontrollertypes "github.com/cosmos/ibc-go/v7/modules/apps/27-interchain-accounts/controller/types"
-	icahosttypes "github.com/cosmos/ibc-go/v7/modules/apps/27-interchain-accounts/host/types"
-
-	errorsmod "cosmossdk.io/errors"
-
-	dbm "github.com/cometbft/cometbft-db"
 	"github.com/cometbft/cometbft/crypto"
 	"github.com/cometbft/cometbft/crypto/ed25519"
-	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cometbft/cometbft/libs/rand"
 	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/ibc-go/v10/modules/apps/transfer"
+	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
+	ibc "github.com/cosmos/ibc-go/v10/modules/core"
+	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
+	ibckeeper "github.com/cosmos/ibc-go/v10/modules/core/keeper"
+	"github.com/stretchr/testify/require"
+
+	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
+	"cosmossdk.io/store"
+	storemetrics "cosmossdk.io/store/metrics"
+	storetypes "cosmossdk.io/store/types"
+	"cosmossdk.io/x/evidence"
+	evidencetypes "cosmossdk.io/x/evidence/types"
+	"cosmossdk.io/x/feegrant"
+	"cosmossdk.io/x/upgrade"
+	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
+
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/std"
-	"github.com/cosmos/cosmos-sdk/store"
-	storetypes "github.com/cosmos/cosmos-sdk/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/address"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
 	"github.com/cosmos/cosmos-sdk/x/auth"
+	authcodec "github.com/cosmos/cosmos-sdk/x/auth/codec"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/cosmos/cosmos-sdk/x/auth/vesting"
@@ -39,47 +52,26 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/bank"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	"github.com/cosmos/cosmos-sdk/x/capability"
-	capabilitykeeper "github.com/cosmos/cosmos-sdk/x/capability/keeper"
-	capabilitytypes "github.com/cosmos/cosmos-sdk/x/capability/types"
-	"github.com/cosmos/cosmos-sdk/x/crisis"
-	crisistypes "github.com/cosmos/cosmos-sdk/x/crisis/types"
 	"github.com/cosmos/cosmos-sdk/x/distribution"
 	distributionkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	"github.com/cosmos/cosmos-sdk/x/evidence"
-	evidencetypes "github.com/cosmos/cosmos-sdk/x/evidence/types"
-	"github.com/cosmos/cosmos-sdk/x/feegrant"
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	govclient "github.com/cosmos/cosmos-sdk/x/gov/client"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
-	govv1beta1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	"github.com/cosmos/cosmos-sdk/x/params"
 	paramsclient "github.com/cosmos/cosmos-sdk/x/params/client"
-	paramskeeper "github.com/cosmos/cosmos-sdk/x/params/keeper"
 	paramstypes "github.com/cosmos/cosmos-sdk/x/params/types"
-	paramproposal "github.com/cosmos/cosmos-sdk/x/params/types/proposal"
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	"github.com/cosmos/cosmos-sdk/x/staking"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	"github.com/cosmos/cosmos-sdk/x/upgrade"
-	upgradeclient "github.com/cosmos/cosmos-sdk/x/upgrade/client"
-	upgradekeeper "github.com/cosmos/cosmos-sdk/x/upgrade/keeper"
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
-	"github.com/cosmos/ibc-go/v7/modules/apps/transfer"
-	ibctransfertypes "github.com/cosmos/ibc-go/v7/modules/apps/transfer/types"
-	ibc "github.com/cosmos/ibc-go/v7/modules/core"
-	ibcexported "github.com/cosmos/ibc-go/v7/modules/core/exported"
-	ibckeeper "github.com/cosmos/ibc-go/v7/modules/core/keeper"
-	"github.com/stretchr/testify/require"
 
-	wasmappparams "github.com/CosmWasm/wasmd/app/params"
+	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/wasmtesting"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
@@ -87,17 +79,13 @@ import (
 var moduleBasics = module.NewBasicManager(
 	auth.AppModuleBasic{},
 	bank.AppModuleBasic{},
-	capability.AppModuleBasic{},
 	staking.AppModuleBasic{},
 	mint.AppModuleBasic{},
 	distribution.AppModuleBasic{},
 	gov.NewAppModuleBasic([]govclient.ProposalHandler{
 		paramsclient.ProposalHandler,
-		upgradeclient.LegacyProposalHandler,
-		upgradeclient.LegacyCancelProposalHandler,
 	}),
 	params.AppModuleBasic{},
-	crisis.AppModuleBasic{},
 	slashing.AppModuleBasic{},
 	ibc.AppModuleBasic{},
 	upgrade.AppModuleBasic{},
@@ -107,18 +95,26 @@ var moduleBasics = module.NewBasicManager(
 )
 
 func MakeTestCodec(t testing.TB) codec.Codec {
-	return MakeEncodingConfig(t).Marshaler
+	return MakeEncodingConfig(t).Codec
 }
 
-func MakeEncodingConfig(_ testing.TB) wasmappparams.EncodingConfig {
-	encodingConfig := wasmappparams.MakeEncodingConfig()
+func MakeEncodingConfig(_ testing.TB) moduletestutil.TestEncodingConfig {
+	encodingConfig := moduletestutil.MakeTestEncodingConfig(
+		auth.AppModule{},
+		bank.AppModule{},
+		staking.AppModule{},
+		mint.AppModule{},
+		slashing.AppModule{},
+		gov.AppModule{},
+		ibc.AppModule{},
+		transfer.AppModule{},
+		vesting.AppModule{},
+	)
 	amino := encodingConfig.Amino
 	interfaceRegistry := encodingConfig.InterfaceRegistry
 
 	std.RegisterInterfaces(interfaceRegistry)
-	std.RegisterLegacyAminoCodec(amino)
 
-	moduleBasics.RegisterLegacyAminoCodec(amino)
 	moduleBasics.RegisterInterfaces(interfaceRegistry)
 	// add wasmd types
 	types.RegisterInterfaces(interfaceRegistry)
@@ -183,64 +179,60 @@ func (f *TestFaucet) NewFundedRandomAccount(ctx sdk.Context, amounts ...sdk.Coin
 }
 
 type TestKeepers struct {
-	AccountKeeper    authkeeper.AccountKeeper
-	StakingKeeper    *stakingkeeper.Keeper
-	DistKeeper       distributionkeeper.Keeper
-	BankKeeper       bankkeeper.Keeper
-	GovKeeper        *govkeeper.Keeper
-	ContractKeeper   types.ContractOpsKeeper
-	WasmKeeper       *Keeper
-	IBCKeeper        *ibckeeper.Keeper
-	Router           MessageRouter
-	EncodingConfig   wasmappparams.EncodingConfig
-	Faucet           *TestFaucet
-	MultiStore       sdk.CommitMultiStore
-	ScopedWasmKeeper capabilitykeeper.ScopedKeeper
-	WasmStoreKey     *storetypes.KVStoreKey
+	AccountKeeper  authkeeper.AccountKeeper
+	StakingKeeper  *stakingkeeper.Keeper
+	DistKeeper     distributionkeeper.Keeper
+	BankKeeper     bankkeeper.Keeper
+	GovKeeper      *govkeeper.Keeper
+	ContractKeeper types.ContractOpsKeeper
+	WasmKeeper     *Keeper
+	IBCKeeper      *ibckeeper.Keeper
+	Router         MessageRouter
+	EncodingConfig moduletestutil.TestEncodingConfig
+	Faucet         *TestFaucet
+	MultiStore     storetypes.CommitMultiStore
+	WasmStoreKey   *storetypes.KVStoreKey
 }
 
 // CreateDefaultTestInput common settings for CreateTestInput
 func CreateDefaultTestInput(t testing.TB) (sdk.Context, TestKeepers) {
-	return CreateTestInput(t, false, "staking")
+	return CreateTestInput(t, false, []string{"staking"})
 }
 
 // CreateTestInput encoders can be nil to accept the defaults, or set it to override some of the message handlers (like default)
-func CreateTestInput(t testing.TB, isCheckTx bool, availableCapabilities string, opts ...Option) (sdk.Context, TestKeepers) {
+func CreateTestInput(t testing.TB, isCheckTx bool, availableCapabilities []string, opts ...Option) (sdk.Context, TestKeepers) {
 	// Load default wasm config
-	return createTestInput(t, isCheckTx, availableCapabilities, types.DefaultWasmConfig(), dbm.NewMemDB(), opts...)
+	return createTestInput(t, isCheckTx, availableCapabilities, types.DefaultNodeConfig(), types.VMConfig{}, dbm.NewMemDB(), opts...)
 }
 
 // encoders can be nil to accept the defaults, or set it to override some of the message handlers (like default)
 func createTestInput(
 	t testing.TB,
 	isCheckTx bool,
-	availableCapabilities string,
-	wasmConfig types.WasmConfig,
+	availableCapabilities []string,
+	nodeConfig types.NodeConfig,
+	vmConfig types.VMConfig,
 	db dbm.DB,
 	opts ...Option,
 ) (sdk.Context, TestKeepers) {
 	tempDir := t.TempDir()
 
-	keys := sdk.NewKVStoreKeys(
+	keys := storetypes.NewKVStoreKeys(
 		authtypes.StoreKey, banktypes.StoreKey, stakingtypes.StoreKey,
 		minttypes.StoreKey, distributiontypes.StoreKey, slashingtypes.StoreKey,
 		govtypes.StoreKey, paramstypes.StoreKey, ibcexported.StoreKey, upgradetypes.StoreKey,
 		evidencetypes.StoreKey, ibctransfertypes.StoreKey,
-		capabilitytypes.StoreKey, feegrant.StoreKey, authzkeeper.StoreKey,
+		feegrant.StoreKey, authzkeeper.StoreKey,
 		types.StoreKey,
 	)
-	ms := store.NewCommitMultiStore(db)
+	logger := log.NewTestLogger(t)
+	ms := store.NewCommitMultiStore(db, logger, storemetrics.NewNoOpMetrics())
 	for _, v := range keys {
 		ms.MountStoreWithDB(v, storetypes.StoreTypeIAVL, db)
 	}
-	tkeys := sdk.NewTransientStoreKeys(paramstypes.TStoreKey)
+	tkeys := storetypes.NewTransientStoreKeys(paramstypes.TStoreKey)
 	for _, v := range tkeys {
 		ms.MountStoreWithDB(v, storetypes.StoreTypeTransient, db)
-	}
-
-	memKeys := sdk.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
-	for _, v := range memKeys {
-		ms.MountStoreWithDB(v, storetypes.StoreTypeMemory, db)
 	}
 
 	require.NoError(t, ms.LoadLatestVersion())
@@ -252,71 +244,8 @@ func createTestInput(
 	ctx = types.WithTXCounter(ctx, 0)
 
 	encodingConfig := MakeEncodingConfig(t)
-	appCodec, legacyAmino := encodingConfig.Marshaler, encodingConfig.Amino
+	appCodec := encodingConfig.Codec
 
-	paramsKeeper := paramskeeper.NewKeeper(
-		appCodec,
-		legacyAmino,
-		keys[paramstypes.StoreKey],
-		tkeys[paramstypes.TStoreKey],
-	)
-	for _, m := range []string{
-		authtypes.ModuleName,
-		banktypes.ModuleName,
-		stakingtypes.ModuleName,
-		minttypes.ModuleName,
-		distributiontypes.ModuleName,
-		slashingtypes.ModuleName,
-		crisistypes.ModuleName,
-		ibctransfertypes.ModuleName,
-		capabilitytypes.ModuleName,
-		ibcexported.ModuleName,
-		govtypes.ModuleName,
-		types.ModuleName,
-	} {
-		paramsKeeper.Subspace(m)
-	}
-	subspace := func(m string) paramstypes.Subspace {
-		r, ok := paramsKeeper.GetSubspace(m)
-		require.True(t, ok)
-
-		var keyTable paramstypes.KeyTable
-		switch r.Name() {
-		case authtypes.ModuleName:
-			keyTable = authtypes.ParamKeyTable() //nolint:staticcheck
-		case banktypes.ModuleName:
-			keyTable = banktypes.ParamKeyTable() //nolint:staticcheck
-		case stakingtypes.ModuleName:
-			keyTable = stakingtypes.ParamKeyTable()
-		case minttypes.ModuleName:
-			keyTable = minttypes.ParamKeyTable() //nolint:staticcheck
-		case distributiontypes.ModuleName:
-			keyTable = distributiontypes.ParamKeyTable() //nolint:staticcheck
-		case slashingtypes.ModuleName:
-			keyTable = slashingtypes.ParamKeyTable() //nolint:staticcheck
-		case govtypes.ModuleName:
-			keyTable = govv1.ParamKeyTable() //nolint:staticcheck
-		case crisistypes.ModuleName:
-			keyTable = crisistypes.ParamKeyTable() //nolint:staticcheck
-			// ibc types
-		case ibctransfertypes.ModuleName:
-			keyTable = ibctransfertypes.ParamKeyTable()
-		case icahosttypes.SubModuleName:
-			keyTable = icahosttypes.ParamKeyTable()
-		case icacontrollertypes.SubModuleName:
-			keyTable = icacontrollertypes.ParamKeyTable()
-			// wasm
-		case types.ModuleName:
-			keyTable = types.ParamKeyTable() //nolint:staticcheck
-		default:
-			return r
-		}
-
-		if !r.HasKeyTable() {
-			r = r.WithKeyTable(keyTable)
-		}
-		return r
-	}
 	maccPerms := map[string][]string{ // module account permissions
 		authtypes.FeeCollectorName:     nil,
 		distributiontypes.ModuleName:   nil,
@@ -327,89 +256,81 @@ func createTestInput(
 		ibctransfertypes.ModuleName:    {authtypes.Minter, authtypes.Burner},
 		types.ModuleName:               {authtypes.Burner},
 	}
+
 	accountKeeper := authkeeper.NewAccountKeeper(
 		appCodec,
-		keys[authtypes.StoreKey],   // target store
-		authtypes.ProtoBaseAccount, // prototype
+		runtime.NewKVStoreService(keys[authtypes.StoreKey]),
+		authtypes.ProtoBaseAccount,
 		maccPerms,
+		authcodec.NewBech32Codec(sdk.Bech32MainPrefix),
 		sdk.Bech32MainPrefix,
-		authtypes.NewModuleAddress(authtypes.ModuleName).String(),
+		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)
 	blockedAddrs := make(map[string]bool)
 	for acc := range maccPerms {
 		blockedAddrs[authtypes.NewModuleAddress(acc).String()] = true
 	}
-
-	require.NoError(t, accountKeeper.SetParams(ctx, authtypes.DefaultParams()))
+	require.NoError(t, accountKeeper.Params.Set(ctx, authtypes.DefaultParams()))
 
 	bankKeeper := bankkeeper.NewBaseKeeper(
 		appCodec,
-		keys[banktypes.StoreKey],
+		runtime.NewKVStoreService(keys[banktypes.StoreKey]),
 		accountKeeper,
 		blockedAddrs,
 		authtypes.NewModuleAddress(banktypes.ModuleName).String(),
+		logger,
 	)
 	require.NoError(t, bankKeeper.SetParams(ctx, banktypes.DefaultParams()))
 
 	stakingKeeper := stakingkeeper.NewKeeper(
 		appCodec,
-		keys[stakingtypes.StoreKey],
+		runtime.NewKVStoreService(keys[stakingtypes.StoreKey]),
 		accountKeeper,
 		bankKeeper,
 		authtypes.NewModuleAddress(stakingtypes.ModuleName).String(),
+		authcodec.NewBech32Codec(sdk.GetConfig().GetBech32ValidatorAddrPrefix()),
+		authcodec.NewBech32Codec(sdk.GetConfig().GetBech32ConsensusAddrPrefix()),
 	)
 	stakingtypes.DefaultParams()
 	require.NoError(t, stakingKeeper.SetParams(ctx, TestingStakeParams))
 
 	distKeeper := distributionkeeper.NewKeeper(
 		appCodec,
-		keys[distributiontypes.StoreKey],
+		runtime.NewKVStoreService(keys[distributiontypes.StoreKey]),
 		accountKeeper,
 		bankKeeper,
 		stakingKeeper,
 		authtypes.FeeCollectorName,
 		authtypes.NewModuleAddress(distributiontypes.ModuleName).String(),
 	)
-	require.NoError(t, distKeeper.SetParams(ctx, distributiontypes.DefaultParams()))
+	require.NoError(t, distKeeper.Params.Set(ctx, distributiontypes.DefaultParams()))
+	require.NoError(t, distKeeper.FeePool.Set(ctx, distributiontypes.InitialFeePool()))
 	stakingKeeper.SetHooks(distKeeper.Hooks())
-
-	// set genesis items required for distribution
-	distKeeper.SetFeePool(ctx, distributiontypes.InitialFeePool())
 
 	upgradeKeeper := upgradekeeper.NewKeeper(
 		map[int64]bool{},
-		keys[upgradetypes.StoreKey],
+		runtime.NewKVStoreService(keys[upgradetypes.StoreKey]),
 		appCodec,
 		tempDir,
 		nil,
 		authtypes.NewModuleAddress(upgradetypes.ModuleName).String(),
 	)
 
-	faucet := NewTestFaucet(t, ctx, bankKeeper, minttypes.ModuleName, sdk.NewCoin("stake", sdk.NewInt(100_000_000_000)))
+	faucet := NewTestFaucet(t, ctx, bankKeeper, minttypes.ModuleName, sdk.NewCoin("stake", sdkmath.NewInt(100_000_000_000)))
 
-	// set some funds ot pay out validatores, based on code from:
+	// set some funds to pay out validators, based on code from:
 	// https://github.com/cosmos/cosmos-sdk/blob/fea231556aee4d549d7551a6190389c4328194eb/x/distribution/keeper/keeper_test.go#L50-L57
 	distrAcc := distKeeper.GetDistributionAccount(ctx)
-	faucet.Fund(ctx, distrAcc.GetAddress(), sdk.NewCoin("stake", sdk.NewInt(2000000)))
+	faucet.Fund(ctx, distrAcc.GetAddress(), sdk.NewCoin("stake", sdkmath.NewInt(2000000)))
 	accountKeeper.SetModuleAccount(ctx, distrAcc)
-
-	capabilityKeeper := capabilitykeeper.NewKeeper(
-		appCodec,
-		keys[capabilitytypes.StoreKey],
-		memKeys[capabilitytypes.MemStoreKey],
-	)
-	scopedIBCKeeper := capabilityKeeper.ScopeToModule(ibcexported.ModuleName)
-	scopedWasmKeeper := capabilityKeeper.ScopeToModule(types.ModuleName)
 
 	ibcKeeper := ibckeeper.NewKeeper(
 		appCodec,
-		keys[ibcexported.StoreKey],
-		subspace(ibcexported.ModuleName),
-		stakingKeeper,
+		runtime.NewKVStoreService(keys[ibcexported.StoreKey]),
+		nil,
 		upgradeKeeper,
-		scopedIBCKeeper,
+		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)
-
 	querier := baseapp.NewGRPCQueryRouter()
 	querier.SetInterfaceRegistry(encodingConfig.InterfaceRegistry)
 	msgRouter := baseapp.NewMsgServiceRouter()
@@ -420,20 +341,20 @@ func createTestInput(
 
 	keeper := NewKeeper(
 		appCodec,
-		keys[types.StoreKey],
+		runtime.NewKVStoreService(keys[types.StoreKey]),
 		accountKeeper,
 		bankKeeper,
 		stakingKeeper,
 		distributionkeeper.NewQuerier(distKeeper),
 		ibcKeeper.ChannelKeeper, // ICS4Wrapper
 		ibcKeeper.ChannelKeeper,
-		&ibcKeeper.PortKeeper,
-		scopedWasmKeeper,
+		ibcKeeper.ChannelKeeperV2,
 		wasmtesting.MockIBCTransferKeeper{},
 		msgRouter,
 		querier,
 		tempDir,
-		wasmConfig,
+		nodeConfig,
+		vmConfig,
 		availableCapabilities,
 		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 		opts...,
@@ -443,50 +364,43 @@ func createTestInput(
 	// add wasm handler so we can loop-back (contracts calling contracts)
 	contractKeeper := NewDefaultPermissionKeeper(&keeper)
 
-	govRouter := govv1beta1.NewRouter().
-		AddRoute(govtypes.RouterKey, govv1beta1.ProposalHandler).
-		AddRoute(paramproposal.RouterKey, params.NewParamChangeProposalHandler(paramsKeeper)).
-		AddRoute(types.RouterKey, NewWasmProposalHandler(&keeper, types.EnableAllProposals))
-
 	govKeeper := govkeeper.NewKeeper(
 		appCodec,
-		keys[govtypes.StoreKey],
+		runtime.NewKVStoreService(keys[govtypes.StoreKey]),
 		accountKeeper,
 		bankKeeper,
 		stakingKeeper,
+		distKeeper,
 		msgRouter,
 		govtypes.DefaultConfig(),
 		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 	)
-	require.NoError(t, govKeeper.SetParams(ctx, govv1.DefaultParams()))
-	govKeeper.SetLegacyRouter(govRouter)
-	govKeeper.SetProposalID(ctx, 1)
+	require.NoError(t, govKeeper.Params.Set(ctx, govv1.DefaultParams()))
 
 	am := module.NewManager( // minimal module set that we use for message/ query tests
-		bank.NewAppModule(appCodec, bankKeeper, accountKeeper, subspace(banktypes.ModuleName)),
-		staking.NewAppModule(appCodec, stakingKeeper, accountKeeper, bankKeeper, subspace(stakingtypes.ModuleName)),
-		distribution.NewAppModule(appCodec, distKeeper, accountKeeper, bankKeeper, stakingKeeper, subspace(distributiontypes.ModuleName)),
-		gov.NewAppModule(appCodec, govKeeper, accountKeeper, bankKeeper, subspace(govtypes.ModuleName)),
+		bank.NewAppModule(appCodec, bankKeeper, accountKeeper, nil),
+		staking.NewAppModule(appCodec, stakingKeeper, accountKeeper, bankKeeper, nil),
+		distribution.NewAppModule(appCodec, distKeeper, accountKeeper, bankKeeper, stakingKeeper, nil),
+		gov.NewAppModule(appCodec, govKeeper, accountKeeper, bankKeeper, nil),
 	)
-	am.RegisterServices(module.NewConfigurator(appCodec, msgRouter, querier))
+	am.RegisterServices(module.NewConfigurator(appCodec, msgRouter, querier)) //nolint:errcheck
 	types.RegisterMsgServer(msgRouter, NewMsgServerImpl(&keeper))
-	types.RegisterQueryServer(querier, NewGrpcQuerier(appCodec, keys[types.ModuleName], keeper, keeper.queryGasLimit))
+	types.RegisterQueryServer(querier, NewGrpcQuerier(appCodec, runtime.NewKVStoreService(keys[types.ModuleName]), keeper, keeper.queryGasLimit))
 
 	keepers := TestKeepers{
-		AccountKeeper:    accountKeeper,
-		StakingKeeper:    stakingKeeper,
-		DistKeeper:       distKeeper,
-		ContractKeeper:   contractKeeper,
-		WasmKeeper:       &keeper,
-		BankKeeper:       bankKeeper,
-		GovKeeper:        govKeeper,
-		IBCKeeper:        ibcKeeper,
-		Router:           msgRouter,
-		EncodingConfig:   encodingConfig,
-		Faucet:           faucet,
-		MultiStore:       ms,
-		ScopedWasmKeeper: scopedWasmKeeper,
-		WasmStoreKey:     keys[types.StoreKey],
+		AccountKeeper:  accountKeeper,
+		StakingKeeper:  stakingKeeper,
+		DistKeeper:     distKeeper,
+		ContractKeeper: contractKeeper,
+		WasmKeeper:     &keeper,
+		BankKeeper:     bankKeeper,
+		GovKeeper:      govKeeper,
+		IBCKeeper:      ibcKeeper,
+		Router:         msgRouter,
+		EncodingConfig: encodingConfig,
+		Faucet:         faucet,
+		MultiStore:     ms,
+		WasmStoreKey:   keys[types.StoreKey],
 	}
 	return ctx, keepers
 }
@@ -513,7 +427,7 @@ var _ MessageRouter = MessageRouterFunc(nil)
 
 type MessageRouterFunc func(ctx sdk.Context, req sdk.Msg) (*sdk.Result, error)
 
-func (m MessageRouterFunc) Handler(msg sdk.Msg) baseapp.MsgServiceHandler {
+func (m MessageRouterFunc) Handler(_ sdk.Msg) baseapp.MsgServiceHandler {
 	return m
 }
 
@@ -638,8 +552,8 @@ type ExampleContractInstance struct {
 	Contract sdk.AccAddress
 }
 
-// SeedNewContractInstance sets the mock wasmerEngine in keeper and calls store + instantiate to init the contract's metadata
-func SeedNewContractInstance(t testing.TB, ctx sdk.Context, keepers TestKeepers, mock types.WasmerEngine) ExampleContractInstance {
+// SeedNewContractInstance sets the mock WasmEngine in keeper and calls store + instantiate to init the contract's metadata
+func SeedNewContractInstance(t testing.TB, ctx sdk.Context, keepers TestKeepers, mock types.WasmEngine) ExampleContractInstance {
 	t.Helper()
 	exampleContract := StoreRandomContract(t, ctx, keepers, mock)
 	contractAddr, _, err := keepers.ContractKeeper.Instantiate(ctx, exampleContract.CodeID, exampleContract.CreatorAddr, exampleContract.CreatorAddr, []byte(`{}`), "", nil)
@@ -650,15 +564,15 @@ func SeedNewContractInstance(t testing.TB, ctx sdk.Context, keepers TestKeepers,
 	}
 }
 
-// StoreRandomContract sets the mock wasmerEngine in keeper and calls store
-func StoreRandomContract(t testing.TB, ctx sdk.Context, keepers TestKeepers, mock types.WasmerEngine) ExampleContract {
+// StoreRandomContract sets the mock WasmEngine in keeper and calls store
+func StoreRandomContract(t testing.TB, ctx sdk.Context, keepers TestKeepers, mock types.WasmEngine) ExampleContract {
 	return StoreRandomContractWithAccessConfig(t, ctx, keepers, mock, nil)
 }
 
 func StoreRandomContractWithAccessConfig(
 	t testing.TB, ctx sdk.Context,
 	keepers TestKeepers,
-	mock types.WasmerEngine,
+	mock types.WasmEngine,
 	cfg *types.AccessConfig,
 ) ExampleContract {
 	t.Helper()
@@ -666,7 +580,7 @@ func StoreRandomContractWithAccessConfig(
 	creator, creatorAddr := keyPubAddr()
 	fundAccounts(t, ctx, keepers.AccountKeeper, keepers.BankKeeper, creatorAddr, anyAmount)
 	keepers.WasmKeeper.wasmVM = mock
-	wasmCode := append(wasmIdent, rand.Bytes(10)...) //nolint:gocritic
+	wasmCode := append(wasmIdent, rand.Bytes(10)...)
 	codeID, checksum, err := keepers.ContractKeeper.Create(ctx, creatorAddr, wasmCode, cfg)
 	require.NoError(t, err)
 	exampleContract := ExampleContract{InitialAmount: anyAmount, Creator: creator, CreatorAddr: creatorAddr, CodeID: codeID, Checksum: checksum}
@@ -692,14 +606,15 @@ func InstantiateHackatomExampleContract(t testing.TB, ctx sdk.Context, keepers T
 	fundAccounts(t, ctx, keepers.AccountKeeper, keepers.BankKeeper, verifierAddr, contract.InitialAmount)
 
 	beneficiary, beneficiaryAddr := keyPubAddr()
-	initMsgBz := HackatomExampleInitMsg{
+	initMsgBz, err := json.Marshal(HackatomExampleInitMsg{
 		Verifier:    verifierAddr,
 		Beneficiary: beneficiaryAddr,
-	}.GetBytes(t)
+	})
+	require.NoError(t, err)
 	initialAmount := sdk.NewCoins(sdk.NewInt64Coin("denom", 100))
 
 	adminAddr := contract.CreatorAddr
-	label := "demo contract to query"
+	label := "hackatom contract"
 	contractAddr, _, err := keepers.ContractKeeper.Instantiate(ctx, contract.CodeID, contract.CreatorAddr, adminAddr, initMsgBz, label, initialAmount)
 	require.NoError(t, err)
 	return HackatomExampleInstance{
@@ -721,14 +636,35 @@ type ExampleInstance struct {
 	Deposit  sdk.Coins
 }
 
-// InstantiateReflectExampleContract load and instantiate the "./testdata/reflect.wasm" contract
+// InstantiateReflectExampleContract load and instantiate the "./testdata/reflect_2_0.wasm" contract
 func InstantiateReflectExampleContract(t testing.TB, ctx sdk.Context, keepers TestKeepers) ExampleInstance {
 	example := StoreReflectContract(t, ctx, keepers)
 	initialAmount := sdk.NewCoins(sdk.NewInt64Coin("denom", 100))
-	label := "demo contract to query"
+	label := "reflect contract"
 	contractAddr, _, err := keepers.ContractKeeper.Instantiate(ctx, example.CodeID, example.CreatorAddr, example.CreatorAddr, []byte("{}"), label, initialAmount)
 
 	require.NoError(t, err)
+	return ExampleInstance{
+		ExampleContract: example,
+		Contract:        contractAddr,
+		Label:           label,
+		Deposit:         initialAmount,
+	}
+}
+
+// InstantiateReflectExampleContractWithPortID load and instantiate the "./testdata/reflect_2_0.wasm" contract with defined port ID
+func InstantiateReflectExampleContractWithPortID(t testing.TB, ctx sdk.Context, keepers TestKeepers, portID string) ExampleInstance {
+	example := StoreReflectContract(t, ctx, keepers)
+	initialAmount := sdk.NewCoins(sdk.NewInt64Coin("denom", 100))
+	label := "reflect contract with port id"
+	contractAddr, _, err := keepers.ContractKeeper.Instantiate(ctx, example.CodeID, example.CreatorAddr, example.CreatorAddr, []byte("{}"), label, initialAmount)
+
+	require.NoError(t, err)
+
+	cInfo := keepers.WasmKeeper.GetContractInfo(ctx, contractAddr)
+	cInfo.IBCPortID = portID
+	keepers.WasmKeeper.mustStoreContractInfo(ctx, contractAddr, cInfo)
+
 	return ExampleInstance{
 		ExampleContract: example,
 		Contract:        contractAddr,
@@ -755,14 +691,21 @@ type IBCReflectExampleInstance struct {
 	ReflectCodeID uint64
 }
 
+func (m IBCReflectExampleInstance) GetBytes(t testing.TB) []byte {
+	initMsgBz, err := json.Marshal(m)
+	require.NoError(t, err)
+	return initMsgBz
+}
+
 // InstantiateIBCReflectContract load and instantiate the "./testdata/ibc_reflect.wasm" contract
 func InstantiateIBCReflectContract(t testing.TB, ctx sdk.Context, keepers TestKeepers) IBCReflectExampleInstance {
 	reflectID := StoreReflectContract(t, ctx, keepers).CodeID
 	ibcReflectID := StoreIBCReflectContract(t, ctx, keepers).CodeID
 
-	initMsgBz := IBCReflectInitMsg{
+	initMsgBz, err := json.Marshal(IBCReflectInitMsg{
 		ReflectCodeID: reflectID,
-	}.GetBytes(t)
+	})
+	require.NoError(t, err)
 	adminAddr := RandomAccountAddress(t)
 
 	contractAddr, _, err := keepers.ContractKeeper.Instantiate(ctx, ibcReflectID, adminAddr, adminAddr, initMsgBz, "ibc-reflect-factory", nil)
@@ -787,6 +730,7 @@ func (m IBCReflectInitMsg) GetBytes(t testing.TB) []byte {
 
 type BurnerExampleInitMsg struct {
 	Payout sdk.AccAddress `json:"payout"`
+	Delete uint32         `json:"delete"`
 }
 
 func (m BurnerExampleInitMsg) GetBytes(t testing.TB) []byte {

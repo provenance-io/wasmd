@@ -3,18 +3,20 @@ package wasm
 import (
 	"testing"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/rand"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/address"
-	clienttypes "github.com/cosmos/ibc-go/v7/modules/core/02-client/types"
-	channeltypes "github.com/cosmos/ibc-go/v7/modules/core/04-channel/types"
-	ibcexported "github.com/cosmos/ibc-go/v7/modules/core/exported"
+	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types" //nolint:staticcheck
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/address"
+
 	"github.com/CosmWasm/wasmd/x/wasm/keeper"
+	"github.com/CosmWasm/wasmd/x/wasm/keeper/wasmtesting"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
@@ -50,8 +52,8 @@ func TestOnRecvPacket(t *testing.T) {
 		},
 		"contract returns err response": {
 			ibcPkg:      anyContractIBCPkg,
-			contractRsp: channeltypes.NewErrorAcknowledgement(types.ErrInvalid.Wrap("testing")),
-			expAck:      channeltypes.NewErrorAcknowledgement(types.ErrInvalid.Wrap("testing")),
+			contractRsp: CreateErrorAcknowledgement(types.ErrInvalid.Wrap("testing")),
+			expAck:      CreateErrorAcknowledgement(types.ErrInvalid.Wrap("testing")),
 			expEvents: sdk.Events{
 				{
 					Type: "ibc_packet_received",
@@ -86,7 +88,7 @@ func TestOnRecvPacket(t *testing.T) {
 		"returned messages executed with error": {
 			ibcPkg:               anyContractIBCPkg,
 			contractOkMsgExecErr: types.ErrInvalid.Wrap("testing"),
-			expAck:               channeltypes.NewErrorAcknowledgement(types.ErrInvalid.Wrap("testing")),
+			expAck:               CreateErrorAcknowledgement(types.ErrInvalid.Wrap("testing")),
 			expEvents: sdk.Events{{
 				Type: "ibc_packet_received",
 				Attributes: []abci.EventAttribute{
@@ -100,23 +102,24 @@ func TestOnRecvPacket(t *testing.T) {
 	}
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
-			mock := IBCContractKeeperMock{
+			mock := wasmtesting.IBCContractKeeperMock{
 				OnRecvPacketFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, msg wasmvmtypes.IBCPacketReceiveMsg) (ibcexported.Acknowledgement, error) {
 					// additional custom event to confirm event handling on state commit/ rollback
 					ctx.EventManager().EmitEvent(myCustomEvent)
 					return spec.contractRsp, spec.contractOkMsgExecErr
 				},
 			}
-			h := NewIBCHandler(mock, nil, nil)
+			channelVersion := ""
+			h := NewIBCHandler(&mock, nil, nil, nil)
 			em := &sdk.EventManager{}
 			ctx := sdk.Context{}.WithEventManager(em)
 			if spec.expPanic {
 				require.Panics(t, func() {
-					_ = h.OnRecvPacket(ctx, spec.ibcPkg, anyRelayerAddr)
+					_ = h.OnRecvPacket(ctx, channelVersion, spec.ibcPkg, anyRelayerAddr)
 				})
 				return
 			}
-			gotAck := h.OnRecvPacket(ctx, spec.ibcPkg, anyRelayerAddr)
+			gotAck := h.OnRecvPacket(ctx, channelVersion, spec.ibcPkg, anyRelayerAddr)
 			assert.Equal(t, spec.expAck, gotAck)
 			assert.Equal(t, spec.expEvents, em.Events())
 		})
@@ -193,18 +196,4 @@ func IBCPacketFixture(mutators ...func(p *channeltypes.Packet)) channeltypes.Pac
 		m(&r)
 	}
 	return r
-}
-
-var _ types.IBCContractKeeper = &IBCContractKeeperMock{}
-
-type IBCContractKeeperMock struct {
-	types.IBCContractKeeper
-	OnRecvPacketFn func(ctx sdk.Context, contractAddr sdk.AccAddress, msg wasmvmtypes.IBCPacketReceiveMsg) (ibcexported.Acknowledgement, error)
-}
-
-func (m IBCContractKeeperMock) OnRecvPacket(ctx sdk.Context, contractAddr sdk.AccAddress, msg wasmvmtypes.IBCPacketReceiveMsg) (ibcexported.Acknowledgement, error) {
-	if m.OnRecvPacketFn == nil {
-		panic("not expected to be called")
-	}
-	return m.OnRecvPacketFn(ctx, contractAddr, msg)
 }

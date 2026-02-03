@@ -5,6 +5,7 @@ import (
 	fmt "fmt"
 	io "io"
 	math_bits "math/bits"
+	"slices"
 
 	proto "github.com/cosmos/gogoproto/proto"
 	"gopkg.in/yaml.v2"
@@ -316,7 +317,7 @@ var fileDescriptor_e6155d98fa173e02 = []byte{
 	0x00,
 }
 
-func (m *AccessTypeParam) Equal(that interface{}) bool {
+func (m *AccessTypeParam) Equal(that any) bool {
 	if that == nil {
 		return m == nil
 	}
@@ -341,7 +342,7 @@ func (m *AccessTypeParam) Equal(that interface{}) bool {
 	return true
 }
 
-func (m *AccessConfig) Equal(that interface{}) bool {
+func (m *AccessConfig) Equal(that any) bool {
 	if that == nil {
 		return m == nil
 	}
@@ -366,18 +367,10 @@ func (m *AccessConfig) Equal(that interface{}) bool {
 	if m.Address != that1.Address {
 		return false
 	}
-	if len(m.Addresses) != len(that1.Addresses) {
-		return false
-	}
-	for i := range m.Addresses {
-		if m.Addresses[i] != that1.Addresses[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(m.Addresses, that1.Addresses)
 }
 
-func (m *Params) Equal(that interface{}) bool {
+func (m *Params) Equal(that any) bool {
 	if that == nil {
 		return m == nil
 	}
@@ -405,7 +398,7 @@ func (m *Params) Equal(that interface{}) bool {
 	return true
 }
 
-func (m *CodeInfo) Equal(that interface{}) bool {
+func (m *CodeInfo) Equal(that any) bool {
 	if that == nil {
 		return m == nil
 	}
@@ -1213,7 +1206,7 @@ func skipTypes(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthTypes        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrInvalidLengthTypes        = fmt.Errorf("proto: negative length found during unmarshalling")
 	ErrIntOverflowTypes          = fmt.Errorf("proto: integer overflow")
 	ErrUnexpectedEndOfGroupTypes = fmt.Errorf("proto: unexpected end of group")
 )

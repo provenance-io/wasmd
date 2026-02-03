@@ -1,8 +1,9 @@
 package types
 
 import (
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+
 	errorsmod "cosmossdk.io/errors"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
 )
 
 // Codes for wasm contract errors
@@ -38,7 +39,7 @@ var (
 	// ErrInvalidMsg error when we cannot process the error returned from the contract
 	ErrInvalidMsg = errorsmod.Register(DefaultCodespace, 10, "invalid CosmosMsg from the contract")
 
-	// ErrMigrationFailed error for rust execution contract failure
+	// ErrMigrationFailed error for rust migration contract failure
 	ErrMigrationFailed = errorsmod.Register(DefaultCodespace, 11, "migrate wasm contract failed")
 
 	// ErrEmpty error for empty content
@@ -85,6 +86,12 @@ var (
 	ErrNoSuchCodeFn = WasmVMFlavouredErrorFactory(errorsmod.Register(DefaultCodespace, 28, "no such code"),
 		func(id uint64) error { return wasmvmtypes.NoSuchCode{CodeID: id} },
 	)
+
+	// ErrVMError means an error occurred in wasmvm (not in the contract itself, but in the host environment)
+	ErrVMError = errorsmod.Register(DefaultCodespace, 29, "wasmvm error")
+
+	// ErrExceedMaxCallDepth error if max message stack size is exceeded
+	ErrExceedMaxCallDepth = errorsmod.Register(DefaultCodespace, 30, "max call depth exceeded")
 )
 
 // WasmVMErrorable mapped error type in wasmvm and are not redacted
@@ -145,6 +152,37 @@ func (e WasmVMFlavouredError) Wrap(desc string) error { return errorsmod.Wrap(e,
 
 // Wrapf extends this error with additional information.
 // It's a handy function to call Wrapf with sdk errors.
-func (e WasmVMFlavouredError) Wrapf(desc string, args ...interface{}) error {
+func (e WasmVMFlavouredError) Wrapf(desc string, args ...any) error {
 	return errorsmod.Wrapf(e, desc, args...)
+}
+
+// DeterministicError is a wrapper type around an error that the creator guarantees to have
+// a deterministic error message.
+// This means that the `Error()` function must always return the same string on all nodes.
+// The DeterministicError has the same error message as the wrapped error.
+// DeterministicErrors are not redacted when returned to a contract,
+// so not upholding this guarantee can lead to consensus failures.
+type DeterministicError struct {
+	error
+}
+
+var _ error = DeterministicError{}
+
+// MarkErrorDeterministic marks an error as deterministic.
+// Make sure to only do that if the error message is deterministic between systems.
+// See [DeterministicError] for more details.
+func MarkErrorDeterministic(e error) DeterministicError {
+	return DeterministicError{error: e}
+}
+
+// Unwrap implements the built-in errors.Unwrap
+func (e DeterministicError) Unwrap() error {
+	return e.error
+}
+
+// Cause is the same as unwrap but used by ABCIInfo
+// By returning the wrapped error here, we ensure that the DeterministicError inherits
+// the ABCIInfo of the wrapped error.
+func (e DeterministicError) Cause() error {
+	return e.Unwrap()
 }

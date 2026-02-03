@@ -3,18 +3,20 @@ package types
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	"github.com/cometbft/cometbft/libs/rand"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestContractInfoValidateBasic(t *testing.T) {
@@ -298,6 +300,8 @@ func TestNewEnv(t *testing.T) {
 	myTime := time.Unix(0, 1619700924259075000)
 	t.Logf("++ unix: %d", myTime.UnixNano())
 	var myContractAddr sdk.AccAddress = randBytes(ContractAddrLen)
+	txHash, _ := hex.DecodeString("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	txHasher := func(data []byte) []byte { return txHash }
 	specs := map[string]struct {
 		srcCtx sdk.Context
 		exp    wasmvmtypes.Env
@@ -313,7 +317,7 @@ func TestNewEnv(t *testing.T) {
 				Contract: wasmvmtypes.ContractInfo{
 					Address: myContractAddr.String(),
 				},
-				Transaction: &wasmvmtypes.TransactionInfo{Index: 0},
+				Transaction: &wasmvmtypes.TransactionInfo{Index: 0, Hash: txHash},
 			},
 		},
 		"without tx counter": {
@@ -332,7 +336,7 @@ func TestNewEnv(t *testing.T) {
 	}
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, spec.exp, NewEnv(spec.srcCtx, myContractAddr))
+			assert.Equal(t, spec.exp, NewEnv(spec.srcCtx, txHasher, myContractAddr))
 		})
 	}
 }
@@ -628,6 +632,77 @@ func TestContractCodeHistoryEntryValidation(t *testing.T) {
 				return
 			}
 			require.NoError(t, gotErr)
+		})
+	}
+}
+
+func TestTxContractsAddContract(t *testing.T) {
+	specs := map[string]struct {
+		checksums [][]byte
+		expLen    int
+	}{
+		"single checksum": {
+			checksums: [][]byte{[]byte("checksum1")},
+			expLen:    1,
+		},
+		"duplicate checksums": {
+			checksums: [][]byte{[]byte("checksum1"), []byte("checksum1")},
+			expLen:    1,
+		},
+		"multiple checksums": {
+			checksums: [][]byte{[]byte("checksum1"), []byte("checksum2")},
+			expLen:    2,
+		},
+		"empty checksum": {
+			checksums: [][]byte{[]byte("")},
+			expLen:    0,
+		},
+	}
+
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			txContracts := NewTxContracts()
+			require.Empty(t, txContracts.GetContracts())
+
+			for _, c := range spec.checksums {
+				txContracts.AddContract(c)
+			}
+
+			assert.Equal(t, spec.expLen, len(txContracts.GetContracts()))
+		})
+	}
+}
+
+func TestTxContractsExists(t *testing.T) {
+	specs := map[string]struct {
+		checksum  []byte
+		expExists bool
+	}{
+		"checksum exists": {
+			checksum:  []byte("checksum1"),
+			expExists: true,
+		},
+		"checksum does not exist": {
+			checksum:  []byte("checksum3"),
+			expExists: false,
+		},
+		"empty checksum": {
+			checksum:  []byte(""),
+			expExists: false,
+		},
+	}
+
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			txContracts := NewTxContracts()
+			require.Empty(t, txContracts.GetContracts())
+			require.False(t, txContracts.Exists(spec.checksum))
+
+			// add checksums
+			txContracts.AddContract([]byte("checksum1"))
+			txContracts.AddContract([]byte("checksum2"))
+
+			assert.Equal(t, spec.expExists, txContracts.Exists(spec.checksum))
 		})
 	}
 }

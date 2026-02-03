@@ -3,11 +3,15 @@
 package keeper
 
 import (
+	"crypto/sha256"
 	"path/filepath"
 
-	storetypes "github.com/cosmos/cosmos-sdk/store/types"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 
-	wasmvm "github.com/CosmWasm/wasmvm"
+	"cosmossdk.io/collections"
+	corestoretypes "cosmossdk.io/core/store"
+
 	"github.com/cosmos/cosmos-sdk/codec"
 
 	"github.com/CosmWasm/wasmd/x/wasm/types"
@@ -17,50 +21,73 @@ import (
 // If customEncoders is non-nil, we can use this to override some of the message handler, especially custom
 func NewKeeper(
 	cdc codec.Codec,
-	storeKey storetypes.StoreKey,
+	storeService corestoretypes.KVStoreService,
 	accountKeeper types.AccountKeeper,
 	bankKeeper types.BankKeeper,
 	stakingKeeper types.StakingKeeper,
 	distrKeeper types.DistributionKeeper,
 	ics4Wrapper types.ICS4Wrapper,
 	channelKeeper types.ChannelKeeper,
-	portKeeper types.PortKeeper,
-	capabilityKeeper types.CapabilityKeeper,
+	channelKeeperV2 types.ChannelKeeperV2,
 	portSource types.ICS20TransferPortSource,
 	router MessageRouter,
 	_ GRPCQueryRouter,
 	homeDir string,
-	wasmConfig types.WasmConfig,
-	availableCapabilities string,
+	nodeConfig types.NodeConfig,
+	vmConfig types.VMConfig,
+	availableCapabilities []string,
 	authority string,
 	opts ...Option,
 ) Keeper {
-	wasmer, err := wasmvm.NewVM(filepath.Join(homeDir, "wasm"), availableCapabilities, contractMemoryLimit, wasmConfig.ContractDebugMode, wasmConfig.MemoryCacheSize)
-	if err != nil {
-		panic(err)
-	}
-
+	sb := collections.NewSchemaBuilder(storeService)
 	keeper := &Keeper{
-		storeKey:             storeKey,
+		storeService:         storeService,
 		cdc:                  cdc,
-		wasmVM:               wasmer,
+		wasmVM:               nil,
 		accountKeeper:        accountKeeper,
 		bank:                 NewBankCoinTransferrer(bankKeeper),
 		accountPruner:        NewVestingCoinBurner(bankKeeper),
-		portKeeper:           portKeeper,
-		capabilityKeeper:     capabilityKeeper,
-		messenger:            NewDefaultMessageHandler(router, ics4Wrapper, channelKeeper, capabilityKeeper, bankKeeper, cdc, portSource),
-		queryGasLimit:        wasmConfig.SmartQueryGasLimit,
-		gasRegister:          NewDefaultWasmGasRegister(),
+		queryGasLimit:        nodeConfig.SmartQueryGasLimit,
+		gasRegister:          types.NewDefaultWasmGasRegister(),
 		maxQueryStackSize:    types.DefaultMaxQueryStackSize,
+		maxCallDepth:         types.DefaultMaxCallDepth,
 		acceptedAccountTypes: defaultAcceptedAccountTypes,
-		authority:            authority,
+		params:               collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
+		propagateGovAuthorization: map[types.AuthorizationPolicyAction]struct{}{
+			types.AuthZActionInstantiate: {},
+		},
+		authority:  authority,
+		txHash:     func(data []byte) []byte { sum := sha256.Sum256(data); return sum[:] },
+		wasmLimits: vmConfig.WasmLimits,
 	}
+	keeper.messenger = NewDefaultMessageHandler(keeper, router, ics4Wrapper, channelKeeperV2, bankKeeper, cdc, portSource)
 	keeper.wasmVMQueryHandler = DefaultQueryPlugins(bankKeeper, stakingKeeper, distrKeeper, channelKeeper, keeper)
-	for _, o := range opts {
+	preOpts, postOpts := splitOpts(opts)
+	for _, o := range preOpts {
 		o.apply(keeper)
 	}
-	// not updateable, yet
+	// only set the wasmvm if no one set this in the options
+	// NewVM does a lot, so better not to create it and silently drop it.
+	if keeper.wasmVM == nil {
+		var err error
+		keeper.wasmVM, err = wasmvm.NewVMWithConfig(wasmvmtypes.VMConfig{
+			Cache: wasmvmtypes.CacheOptions{
+				BaseDir:                  filepath.Join(homeDir, "wasm"),
+				AvailableCapabilities:    availableCapabilities,
+				MemoryCacheSizeBytes:     wasmvmtypes.NewSizeMebi(nodeConfig.MemoryCacheSize),
+				InstanceMemoryLimitBytes: wasmvmtypes.NewSizeMebi(contractMemoryLimit),
+			},
+			WasmLimits: vmConfig.WasmLimits,
+		}, nodeConfig.ContractDebugMode)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	for _, o := range postOpts {
+		o.apply(keeper)
+	}
+	// not updatable, yet
 	keeper.wasmVMResponseHandler = NewDefaultWasmVMContractResponseHandler(NewMessageDispatcher(keeper.messenger, keeper))
 	return *keeper
 }

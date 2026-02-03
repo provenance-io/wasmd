@@ -13,13 +13,13 @@ This is often empty, but sometimes custom protobuf formats to return essential i
 
 Every message in the SDK may add events to the EventManager and these are then added to the final ABCI result that is returned
 to Tendermint. Events are exposed in 3 different ways over the Tendermint API (which is the only way a client can query).
-First of all is the `events` field on the transaction result (when you query a transaction by hash, you can see all event emitted
+First of all is the `events` field on the transaction result (when you query a transaction by hash, you can see all events emitted
 by it). Secondly is the `log` field on the same transaction result. And third is the query interface to search or subscribe for
 transactions. 
 
 The `log` field actually has the best data. It contains an array of array of events. The first array is one entry per incoming message.
 Transactions in the Cosmos SDK may consist of multiple messages that are executed atomically. Maybe we send tokens, then issue a swap
-on a DEX. Each action would return it's own list of Events and in the logs, these are separated. For each message, it maintains a list
+on a DEX. Each action would return its own list of Events and in the logs, these are separated. For each message, it maintains a list
 of Events, exactly in the order returned by the application. This is JSON encoded and can be parsed by a client. In fact this is
 how [CosmJS](https://github.com/cosmos/cosmjs) gets the events it shows to the client.
 
@@ -46,7 +46,7 @@ consistent order (and avoid dictionaries/hashes). Here is a simple Event in JSON
     "type": "wasm", 
     "attributes": [
         {"key": "_contract_address", "value": "cosmos1pkptre7fdkl6gfrzlesjjvhxhlc3r4gmmk8rs6"}, 
-        {"key": "transfered", "value": "777000"}
+        {"key": "transferred", "value": "777000"}
     ]
 }
 ```
@@ -105,7 +105,7 @@ sdk.NewEvent(
 ),
 ```
 
-The delegation module seems a bit more refined, emitting a generic "message" type event in [`msg_server.go`](https://github.com/cosmos/cosmos-sdk/blob/v0.42.9/x/distribution/keeper/msg_server.go#L42-L46) including the module name, **before** 
+The delegation module seems a bit more refined, emitting a generic "message" type event in [`msg_server.go`](https://github.com/cosmos/cosmos-sdk/blob/v0.42.9/x/distribution/keeper/msg_server.go#L42-L46) including the module name, **before**
 emitting some custom event types closer to the actual code logic in
 [`keeper.go`](https://github.com/cosmos/cosmos-sdk/blob/v0.42.9/x/distribution/keeper/keeper.go#L74-L77).
 
@@ -125,7 +125,7 @@ sdk.NewEvent(
 
 ## Usage in wasmd
 
-In `x/wasm` we also use Events system. On one hand, the Go implementation of `x/wasm` emits standard events for each 
+In `x/wasm` we also use the Events system. On one hand, the Go implementation of `x/wasm` emits standard events for each 
 message it processes, using the `distribution` module as an example. Furthermore, it allows contracts to
 emit custom events based on their execution state, so they can for example say "dex swap, BTC-ATOM, in 0.23, out 512"
 which require internal knowledge of the contract and is very useful for custom dApp UIs.
@@ -240,7 +240,7 @@ If the response contains a non-empty list of `attributes`, `x/wasm` will emit a 
 always be tagged with `_contract_address` by the Go module, so this is trust-worthy. The contract itself cannot overwrite
 this field. Beyond this, the `attributes` returned by the contract, these are appended to the same event.
 
-A contact may also return custom `events`. These are multiple events, each with their own type as well as attributes.
+A contract may also return custom `events`. These are multiple events, each with their own type as well as attributes.
 When they are received, `x/wasm` prepends `wasm-` to the event type returned by the contact to avoid them trying to fake
 an eg. `transfer` event from the bank module. The output here may look like:
 
@@ -277,7 +277,7 @@ sdk.NewEvent(
 )
 ```
 
-If the Response contains neither `event` nor `attributes`, not `wasm*` events will be emitted, just the standard `message`
+If the Response contains neither `event` nor `attributes`, no `wasm*` events will be emitted, just the standard `message`
 type as well as the action-dependent event (like `execute` or `migrate`). This is a significant change from pre-0.18 versions
 where one could count on the `wasm` event to always be emitted. Now it is recommended to search for `execute._contract_address="foo"`
 to find all transactions related to the contract.
@@ -304,7 +304,7 @@ flatten that in a meaningful way to feed it into the event system.
 
 Furthermore, with the sub-message reply handlers, we end up with eg. "Contract A execute", "Contract B execute",
 "Contract A reply". If we return all events by all of these, we may end up with many repeated event types and
-a confusing results. However, we may use the standard "message" events to separate the sub-messages as it marks
+confusing results. However, we may use the standard "message" events to separate the sub-messages as it marks
 where the next one starts. With careful analysis of the "sender" field on these "message" markers, we may be able
 to reconstruct much of the tree execution path. We should ensure all this information is exposed in the most
 consistent way possible.
@@ -312,7 +312,7 @@ consistent way possible.
 ### Combining Events from Sub-Messages
 
 Each time a contract is executed, it not only returns the `message` event from its call, the `execute` event for the
-contact and the `wasm` event with any custom fields from the contract itself. It will also return the same set of information
+contract and the `wasm` event with any custom fields from the contract itself. It will also return the same set of information
 for all messages that it returned, which were later dispatched. The event system was really designed for one main
 action emitting events, so we define a structure to flatten this event tree:
 
@@ -321,10 +321,10 @@ action emitting events, so we define a structure to flatten this event tree:
 * All events are returned in execution order as [defined by CosmWasm docs](https://github.com/CosmWasm/cosmwasm/blob/main/SEMANTICS.md#dispatching-messages)
 * `x/wasm` keeper emits a custom event for each call to a contract entry point. Not just `execute`, `instantiate`,
   and `migrate`, but also `reply`, `sudo` and all ibc entry points.
-* This means all `wasm*` events are preceeded by the cosmwasm entry point that returned them. 
+* This means all `wasm*` events are preceded by the cosmwasm entry point that returned them. 
 
 To make this more clear, I will provide an example of executing a contract, which returns two messages, one to instantiate a new
-contract and the other to set the withdrawl address, while also using `ReplyOnSuccess` for the instantiation (to get the
+contract and the other to set the withdrawal address, while also using `ReplyOnSuccess` for the instantiation (to get the
 address). It will emit a series of events that looks something like this:
 
 ```go
@@ -335,7 +335,7 @@ sdk.NewEvent(
     sdk.NewAttribute("sender", msg.Sender),  
 ),
 
-// top-level exection call
+// top-level execution call
 sdk.NewEvent(
     "execute",
     sdk.NewAttribute("_contract_address", contractAddr.String()),
@@ -346,7 +346,7 @@ sdk.NewEvent(
     sdk.NewAttribute("custom", "from contract"),
 ),
 
-// instantiating contract (first dipatched message)
+// instantiating contract (first dispatched message)
 sdk.NewEvent(
     "instantiate",
     sdk.NewAttribute("code_id", fmt.Sprintf("%d", msg.CodeID)),
@@ -382,7 +382,7 @@ sdk.NewEvent(
 
 When the `reply` clause in a contract is called, it will receive the data returned from the message it
 applies to, as well as all events from that message. In the above case, when the `reply` function was called
-on `contractAddr` in response to initializing a contact, it would get the binary-encoded `initData` in the `data`
+on `contractAddr` in response to initializing a contract, it would get the binary-encoded `initData` in the `data`
 field, and the following in the `events` field:
 
 ```go
@@ -415,6 +415,6 @@ sdk.NewEvent(
 
 ## IBC Events
 
-All IBC entry points are only called by external accounts and not from contracts. They need to contain proofs of state of other blockchains and cannot be called by other contracts on the same chain. Therefore, the event emitted are not essential for cross-contract calls, and `x/wasm` does not emit custom events for these actions.
+All IBC entry points are only called by external accounts and not from contracts. They need to contain proofs of state of other blockchains and cannot be called by other contracts on the same chain. Therefore, the events emitted are not essential for cross-contract calls, and `x/wasm` does not emit custom events for these actions.
 
 There are well-defined events emitted by the IBC base layer and are required for the relayer functionality. If you wish to subscribe to these, you can find them [defined in the `ibc-go` codebase](https://github.com/cosmos/ibc-go/blob/main/modules/core/04-channel/keeper/events.go).

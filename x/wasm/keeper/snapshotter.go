@@ -3,11 +3,15 @@ package keeper
 import (
 	"encoding/hex"
 	"io"
+	"math"
+
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	errorsmod "cosmossdk.io/errors"
-	"github.com/cometbft/cometbft/libs/log"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	snapshot "github.com/cosmos/cosmos-sdk/snapshots/types"
+	"cosmossdk.io/log"
+	snapshot "cosmossdk.io/store/snapshots/types"
+	storetypes "cosmossdk.io/store/types"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/CosmWasm/wasmd/x/wasm/ioutils"
@@ -21,10 +25,10 @@ const SnapshotFormat = 1
 
 type WasmSnapshotter struct {
 	wasm *Keeper
-	cms  sdk.MultiStore
+	cms  storetypes.MultiStore
 }
 
-func NewWasmSnapshotter(cms sdk.MultiStore, wasm *Keeper) *WasmSnapshotter {
+func NewWasmSnapshotter(cms storetypes.MultiStore, wasm *Keeper) *WasmSnapshotter {
 	return &WasmSnapshotter{
 		wasm: wasm,
 		cms:  cms,
@@ -99,13 +103,13 @@ func restoreV1(_ sdk.Context, k *Keeper, compressedCode []byte) error {
 	if !ioutils.IsGzip(compressedCode) {
 		return types.ErrInvalid.Wrap("not a gzip")
 	}
-	wasmCode, err := ioutils.Uncompress(compressedCode, uint64(types.MaxWasmSize))
+	wasmCode, err := ioutils.Uncompress(compressedCode, math.MaxInt64)
 	if err != nil {
 		return errorsmod.Wrap(types.ErrCreateFailed, err.Error())
 	}
 
 	// FIXME: check which codeIDs the checksum matches??
-	_, err = k.wasmVM.Create(wasmCode)
+	_, err = k.wasmVM.StoreCodeUnchecked(wasmCode)
 	if err != nil {
 		return errorsmod.Wrap(types.ErrCreateFailed, err.Error())
 	}

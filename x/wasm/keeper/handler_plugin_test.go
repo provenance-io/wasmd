@@ -4,20 +4,24 @@ import (
 	"encoding/json"
 	"testing"
 
-	errorsmod "cosmossdk.io/errors"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	"github.com/cosmos/gogoproto/proto"
+	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types" //nolint:staticcheck
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	wasmvm "github.com/CosmWasm/wasmvm"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
-	"github.com/cometbft/cometbft/libs/log"
+	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
+
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	capabilitytypes "github.com/cosmos/cosmos-sdk/x/capability/types"
-	clienttypes "github.com/cosmos/ibc-go/v7/modules/core/02-client/types"
-	channeltypes "github.com/cosmos/ibc-go/v7/modules/core/04-channel/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/wasmtesting"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
@@ -27,13 +31,13 @@ func TestMessageHandlerChainDispatch(t *testing.T) {
 	capturingHandler, gotMsgs := wasmtesting.NewCapturingMessageHandler()
 
 	alwaysUnknownMsgHandler := &wasmtesting.MockMessageHandler{
-		DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, err error) {
-			return nil, nil, types.ErrUnknownMsg
+		DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, msgResponses [][]*codectypes.Any, err error) {
+			return nil, nil, [][]*codectypes.Any{}, types.ErrUnknownMsg
 		},
 	}
 
 	assertNotCalledHandler := &wasmtesting.MockMessageHandler{
-		DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, err error) {
+		DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, msgResponses [][]*codectypes.Any, err error) {
 			t.Fatal("not expected to be called")
 			return
 		},
@@ -56,8 +60,8 @@ func TestMessageHandlerChainDispatch(t *testing.T) {
 		},
 		"stops iteration on handler error": {
 			handlers: []Messenger{&wasmtesting.MockMessageHandler{
-				DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, err error) {
-					return nil, nil, types.ErrInvalidMsg
+				DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, msgResponses [][]*codectypes.Any, err error) {
+					return nil, nil, [][]*codectypes.Any{}, types.ErrInvalidMsg
 				},
 			}, assertNotCalledHandler},
 			expErr: types.ErrInvalidMsg,
@@ -65,9 +69,9 @@ func TestMessageHandlerChainDispatch(t *testing.T) {
 		"return events when handle": {
 			handlers: []Messenger{
 				&wasmtesting.MockMessageHandler{
-					DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, err error) {
-						_, data, _ = capturingHandler.DispatchMsg(ctx, contractAddr, contractIBCPortID, msg)
-						return []sdk.Event{sdk.NewEvent("myEvent", sdk.NewAttribute("foo", "bar"))}, data, nil
+					DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, msgResponses [][]*codectypes.Any, err error) {
+						_, data, msgResponses, _ = capturingHandler.DispatchMsg(ctx, contractAddr, contractIBCPortID, msg)
+						return []sdk.Event{sdk.NewEvent("myEvent", sdk.NewAttribute("foo", "bar"))}, data, msgResponses, nil
 					},
 				},
 			},
@@ -84,7 +88,7 @@ func TestMessageHandlerChainDispatch(t *testing.T) {
 
 			// when
 			h := MessageHandlerChain{spec.handlers}
-			gotEvents, gotData, gotErr := h.DispatchMsg(sdk.Context{}, RandomAccountAddress(t), "anyPort", myMsg)
+			gotEvents, gotData, gotMsgResponses, gotErr := h.DispatchMsg(sdk.Context{}, RandomAccountAddress(t), "anyPort", myMsg)
 
 			// then
 			require.True(t, spec.expErr.Is(gotErr), "exp %v but got %#+v", spec.expErr, gotErr)
@@ -93,6 +97,7 @@ func TestMessageHandlerChainDispatch(t *testing.T) {
 			}
 			assert.Equal(t, []wasmvmtypes.CosmosMsg{myMsg}, *gotMsgs)
 			assert.Equal(t, [][]byte{{1}}, gotData) // {1} is default in capturing handler
+			assert.Equal(t, [][]*codectypes.Any{}, gotMsgResponses)
 			assert.Equal(t, spec.expEvents, gotEvents)
 		})
 	}
@@ -205,8 +210,8 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 
 			// when
 			ctx := sdk.Context{}
-			h := NewSDKMessageHandler(spec.srcRoute, MessageEncoders{Custom: spec.srcEncoder})
-			gotEvents, gotData, gotErr := h.DispatchMsg(ctx, myContractAddr, "myPort", myContractMessage)
+			h := NewSDKMessageHandler(MakeTestCodec(t), spec.srcRoute, MessageEncoders{Custom: spec.srcEncoder})
+			gotEvents, gotData, gotMsgResponses, gotErr := h.DispatchMsg(ctx, myContractAddr, "myPort", myContractMessage)
 
 			// then
 			require.True(t, spec.expErr.Is(gotErr), "exp %v but got %#+v", spec.expErr, gotErr)
@@ -215,9 +220,11 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 				return
 			}
 			assert.Len(t, gotMsg, spec.expMsgDispatched)
+			assert.Len(t, gotMsgResponses, spec.expMsgDispatched)
 			for i := 0; i < spec.expMsgDispatched; i++ {
 				assert.Equal(t, myEvent, gotEvents[i])
 				assert.Equal(t, []byte(myData), gotData[i])
+				assert.Equal(t, []*codectypes.Any(nil), gotMsgResponses[i])
 			}
 		})
 	}
@@ -225,7 +232,7 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 
 func TestIBCRawPacketHandler(t *testing.T) {
 	ibcPort := "contractsIBCPort"
-	ctx := sdk.Context{}.WithLogger(log.TestingLogger())
+	ctx := sdk.Context{}.WithLogger(log.NewTestLogger(t))
 
 	type CapturedPacket struct {
 		sourcePort       string
@@ -234,11 +241,13 @@ func TestIBCRawPacketHandler(t *testing.T) {
 		timeoutTimestamp uint64
 		data             []byte
 	}
-	var capturedPacket *CapturedPacket
+	var capturedPacketSent *CapturedPacket
+	var capturedAck []byte
+	var capturedPacketAck *CapturedPacket
 
-	capturePacketsSenderMock := &wasmtesting.MockIBCPacketSender{
-		SendPacketFn: func(ctx sdk.Context, channelCap *capabilitytypes.Capability, sourcePort string, sourceChannel string, timeoutHeight clienttypes.Height, timeoutTimestamp uint64, data []byte) (uint64, error) {
-			capturedPacket = &CapturedPacket{
+	capturingICS4Mock := &wasmtesting.MockICS4Wrapper{
+		SendPacketFn: func(ctx sdk.Context, sourcePort, sourceChannel string, timeoutHeight clienttypes.Height, timeoutTimestamp uint64, data []byte) (uint64, error) {
+			capturedPacketSent = &CapturedPacket{
 				sourcePort:       sourcePort,
 				sourceChannel:    sourceChannel,
 				timeoutHeight:    timeoutHeight,
@@ -247,66 +256,88 @@ func TestIBCRawPacketHandler(t *testing.T) {
 			}
 			return 1, nil
 		},
-	}
-	chanKeeper := &wasmtesting.MockChannelKeeper{
-		GetChannelFn: func(ctx sdk.Context, srcPort, srcChan string) (channeltypes.Channel, bool) {
-			return channeltypes.Channel{
-				Counterparty: channeltypes.NewCounterparty(
-					"other-port",
-					"other-channel-1",
-				),
-			}, true
+		WriteAcknowledgementFn: func(ctx sdk.Context, packet ibcexported.PacketI, acknowledgement ibcexported.Acknowledgement) error {
+			capturedPacketAck = &CapturedPacket{
+				sourcePort:       packet.GetSourcePort(),
+				sourceChannel:    packet.GetSourceChannel(),
+				timeoutHeight:    packet.GetTimeoutHeight().(clienttypes.Height),
+				timeoutTimestamp: packet.GetTimeoutTimestamp(),
+				data:             packet.GetData(),
+			}
+			capturedAck = acknowledgement.Acknowledgement()
+			return nil
 		},
 	}
-	capKeeper := &wasmtesting.MockCapabilityKeeper{
-		GetCapabilityFn: func(ctx sdk.Context, name string) (*capabilitytypes.Capability, bool) {
-			return &capabilitytypes.Capability{}, true
-		},
+	contractKeeper := wasmtesting.IBCContractKeeperMock{}
+	// also store a packet to be acked
+	ackPacket := channeltypes.Packet{
+		Sequence:           1,
+		SourcePort:         "src-port",
+		SourceChannel:      "channel-0",
+		DestinationPort:    ibcPort,
+		DestinationChannel: "channel-1",
+		Data:               []byte{},
+		TimeoutHeight:      clienttypes.Height{},
+		TimeoutTimestamp:   1720000000000000000,
 	}
+	contractKeeper.StoreAsyncAckPacket(ctx, ackPacket)
+
+	sendResponse := types.MsgIBCSendResponse{Sequence: 1}
+	ackResponse := types.MsgIBCWriteAcknowledgementResponse{}
 
 	specs := map[string]struct {
-		srcMsg        wasmvmtypes.SendPacketMsg
-		chanKeeper    types.ChannelKeeper
-		capKeeper     types.CapabilityKeeper
+		srcMsg        wasmvmtypes.IBCMsg
 		expPacketSent *CapturedPacket
+		expPacketAck  *CapturedPacket
+		expAck        []byte
 		expErr        *errorsmod.Error
+		expResp       proto.Message
 	}{
-		"all good": {
-			srcMsg: wasmvmtypes.SendPacketMsg{
-				ChannelID: "channel-1",
-				Data:      []byte("myData"),
-				Timeout:   wasmvmtypes.IBCTimeout{Block: &wasmvmtypes.IBCTimeoutBlock{Revision: 1, Height: 2}},
+		"send packet, all good": {
+			srcMsg: wasmvmtypes.IBCMsg{
+				SendPacket: &wasmvmtypes.SendPacketMsg{
+					ChannelID: "channel-1",
+					Data:      []byte("myData"),
+					Timeout:   wasmvmtypes.IBCTimeout{Block: &wasmvmtypes.IBCTimeoutBlock{Revision: 1, Height: 2}},
+				},
 			},
-			chanKeeper: chanKeeper,
-			capKeeper:  capKeeper,
 			expPacketSent: &CapturedPacket{
 				sourcePort:    ibcPort,
 				sourceChannel: "channel-1",
 				timeoutHeight: clienttypes.Height{RevisionNumber: 1, RevisionHeight: 2},
 				data:          []byte("myData"),
 			},
+			expResp: &sendResponse,
 		},
-		"capability not found returns error": {
-			srcMsg: wasmvmtypes.SendPacketMsg{
-				ChannelID: "channel-1",
-				Data:      []byte("myData"),
-				Timeout:   wasmvmtypes.IBCTimeout{Block: &wasmvmtypes.IBCTimeoutBlock{Revision: 1, Height: 2}},
-			},
-			chanKeeper: chanKeeper,
-			capKeeper: wasmtesting.MockCapabilityKeeper{
-				GetCapabilityFn: func(ctx sdk.Context, name string) (*capabilitytypes.Capability, bool) {
-					return nil, false
+		"async ack, all good": {
+			srcMsg: wasmvmtypes.IBCMsg{
+				WriteAcknowledgement: &wasmvmtypes.WriteAcknowledgementMsg{
+					ChannelID:      "channel-1",
+					PacketSequence: 1,
+					Ack:            wasmvmtypes.IBCAcknowledgement{Data: []byte("myAck")},
 				},
 			},
-			expErr: channeltypes.ErrChannelCapabilityNotFound,
+			expPacketAck: &CapturedPacket{
+				sourcePort:       ackPacket.SourcePort,
+				sourceChannel:    ackPacket.SourceChannel,
+				timeoutHeight:    ackPacket.TimeoutHeight,
+				timeoutTimestamp: ackPacket.TimeoutTimestamp,
+				data:             ackPacket.Data,
+			},
+			expAck:  []byte("myAck"),
+			expResp: &ackResponse,
 		},
 	}
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
-			capturedPacket = nil
+			capturedPacketSent = nil
+			capturedAck = nil
+			capturedPacketAck = nil
+
 			// when
-			h := NewIBCRawPacketHandler(capturePacketsSenderMock, spec.chanKeeper, spec.capKeeper)
-			evts, data, gotErr := h.DispatchMsg(ctx, RandomAccountAddress(t), ibcPort, wasmvmtypes.CosmosMsg{IBC: &wasmvmtypes.IBCMsg{SendPacket: &spec.srcMsg}})
+			h := NewIBCRawPacketHandler(capturingICS4Mock, &contractKeeper)
+			evts, data, msgResponses, gotErr := h.DispatchMsg(ctx, RandomAccountAddress(t), ibcPort, wasmvmtypes.CosmosMsg{IBC: &spec.srcMsg}) //nolint:gosec
+
 			// then
 			require.True(t, spec.expErr.Is(gotErr), "exp %v but got %#+v", spec.expErr, gotErr)
 			if spec.expErr != nil {
@@ -315,15 +346,17 @@ func TestIBCRawPacketHandler(t *testing.T) {
 
 			assert.Nil(t, evts)
 			require.NotNil(t, data)
+			assert.Len(t, msgResponses, 1)
+			assert.Equal(t, "/"+proto.MessageName(spec.expResp), msgResponses[0][0].TypeUrl)
 
-			expMsg := types.MsgIBCSendResponse{Sequence: 1}
-
-			actualMsg := types.MsgIBCSendResponse{}
-			err := actualMsg.Unmarshal(data[0])
+			// compare expected responses
+			expResp, err := proto.Marshal(spec.expResp)
 			require.NoError(t, err)
+			assert.Equal(t, expResp, msgResponses[0][0].Value)
 
-			assert.Equal(t, expMsg, actualMsg)
-			assert.Equal(t, spec.expPacketSent, capturedPacket)
+			assert.Equal(t, spec.expPacketSent, capturedPacketSent)
+			assert.Equal(t, spec.expAck, capturedAck)
+			assert.Equal(t, spec.expPacketAck, capturedPacketAck)
 		})
 	}
 }
@@ -334,12 +367,12 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 	// picks the message in the default handler chain
 	ctx, keepers := CreateDefaultTestInput(t)
 	// set some supply
-	keepers.Faucet.NewFundedRandomAccount(ctx, sdk.NewCoin("denom", sdk.NewInt(10_000_000)))
+	keepers.Faucet.NewFundedRandomAccount(ctx, sdk.NewCoin("denom", sdkmath.NewInt(10_000_000)))
 	k := keepers.WasmKeeper
 
 	example := InstantiateHackatomExampleContract(t, ctx, keepers) // with deposit of 100 stake
 
-	before, err := keepers.BankKeeper.TotalSupply(sdk.WrapSDKContext(ctx), &banktypes.QueryTotalSupplyRequest{})
+	before, err := keepers.BankKeeper.TotalSupply(ctx, &banktypes.QueryTotalSupplyRequest{})
 	require.NoError(t, err)
 
 	specs := map[string]struct {
@@ -348,7 +381,7 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 	}{
 		"all good": {
 			msg: wasmvmtypes.BurnMsg{
-				Amount: wasmvmtypes.Coins{{
+				Amount: wasmvmtypes.Array[wasmvmtypes.Coin]{{
 					Denom:  "denom",
 					Amount: "100",
 				}},
@@ -356,7 +389,7 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 		},
 		"not enough funds in contract": {
 			msg: wasmvmtypes.BurnMsg{
-				Amount: wasmvmtypes.Coins{{
+				Amount: wasmvmtypes.Array[wasmvmtypes.Coin]{{
 					Denom:  "denom",
 					Amount: "101",
 				}},
@@ -365,7 +398,7 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 		},
 		"zero amount rejected": {
 			msg: wasmvmtypes.BurnMsg{
-				Amount: wasmvmtypes.Coins{{
+				Amount: wasmvmtypes.Array[wasmvmtypes.Coin]{{
 					Denom:  "denom",
 					Amount: "0",
 				}},
@@ -374,7 +407,7 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 		},
 		"unknown denom - insufficient funds": {
 			msg: wasmvmtypes.BurnMsg{
-				Amount: wasmvmtypes.Coins{{
+				Amount: wasmvmtypes.Array[wasmvmtypes.Coin]{{
 					Denom:  "unknown",
 					Amount: "1",
 				}},
@@ -386,10 +419,12 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
 			ctx, _ = parentCtx.CacheContext()
-			k.wasmVM = &wasmtesting.MockWasmer{ExecuteFn: func(codeID wasmvm.Checksum, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, executeMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.Response, uint64, error) {
-				return &wasmvmtypes.Response{
-					Messages: []wasmvmtypes.SubMsg{
-						{Msg: wasmvmtypes.CosmosMsg{Bank: &wasmvmtypes.BankMsg{Burn: &spec.msg}}, ReplyOn: wasmvmtypes.ReplyNever},
+			k.wasmVM = &wasmtesting.MockWasmEngine{ExecuteFn: func(codeID wasmvm.Checksum, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, executeMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error) {
+				return &wasmvmtypes.ContractResult{
+					Ok: &wasmvmtypes.Response{
+						Messages: []wasmvmtypes.SubMsg{
+							{Msg: wasmvmtypes.CosmosMsg{Bank: &wasmvmtypes.BankMsg{Burn: &spec.msg}}, ReplyOn: wasmvmtypes.ReplyNever}, //nolint:gosec
+						},
 					},
 				}, 0, nil
 			}}
@@ -405,10 +440,10 @@ func TestBurnCoinMessageHandlerIntegration(t *testing.T) {
 			require.NoError(t, err)
 
 			// and total supply reduced by burned amount
-			after, err := keepers.BankKeeper.TotalSupply(sdk.WrapSDKContext(ctx), &banktypes.QueryTotalSupplyRequest{})
+			after, err := keepers.BankKeeper.TotalSupply(ctx, &banktypes.QueryTotalSupplyRequest{})
 			require.NoError(t, err)
 			diff := before.Supply.Sub(after.Supply...)
-			assert.Equal(t, sdk.NewCoins(sdk.NewCoin("denom", sdk.NewInt(100))), diff)
+			assert.Equal(t, sdk.NewCoins(sdk.NewCoin("denom", sdkmath.NewInt(100))), diff)
 		})
 	}
 

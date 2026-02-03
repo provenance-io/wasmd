@@ -7,38 +7,42 @@ import (
 	"testing"
 	"time"
 
-	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
-	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
-
-	dbm "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/libs/log"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	tmtypes "github.com/cometbft/cometbft/types"
+	cmtypes "github.com/cometbft/cometbft/types"
+	dbm "github.com/cosmos/cosmos-db"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
+
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/testutil/mock"
+	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-
-	"github.com/CosmWasm/wasmd/app"
-	"github.com/CosmWasm/wasmd/x/wasm"
-	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
-
-	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
+	"github.com/CosmWasm/wasmd/app"
+	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
-func setup(db dbm.DB, withGenesis bool, invCheckPeriod uint, opts ...wasm.Option) (*app.WasmApp, app.GenesisState) { //nolint:unparam
-	wasmApp := app.NewWasmApp(log.NewTMLogger(log.NewSyncWriter(os.Stdout)), db, nil, true, wasm.EnableAllProposals, simtestutil.EmptyAppOptions{}, nil)
+func setup(db dbm.DB, withGenesis bool) (*app.WasmApp, app.GenesisState) {
+	logLevel := log.LevelOption(zerolog.InfoLevel)
+
+	// Disable prunning for testing purposes to prevent dangling background
+	// goroutines left between test scenarios
+	disablePrunning := baseapp.SetIAVLSyncPruning(true)
+	wasmApp := app.NewWasmApp(log.NewLogger(os.Stdout, logLevel), db, nil, true, simtestutil.EmptyAppOptions{}, nil, disablePrunning)
 
 	if withGenesis {
-		return wasmApp, app.NewDefaultGenesisState(wasmApp.AppCodec())
+		return wasmApp, wasmApp.DefaultGenesis()
 	}
 	return wasmApp, app.GenesisState{}
 }
@@ -46,7 +50,7 @@ func setup(db dbm.DB, withGenesis bool, invCheckPeriod uint, opts ...wasm.Option
 // SetupWithGenesisAccountsAndValSet initializes a new WasmApp with the provided genesis
 // accounts and possible balances.
 func SetupWithGenesisAccountsAndValSet(b testing.TB, db dbm.DB, genAccs []authtypes.GenesisAccount, balances ...banktypes.Balance) *app.WasmApp {
-	wasmApp, genesisState := setup(db, true, 0)
+	wasmApp, genesisState := setup(db, true)
 	authGenesis := authtypes.NewGenesisState(authtypes.DefaultParams(), genAccs)
 	appCodec := wasmApp.AppCodec()
 
@@ -56,8 +60,8 @@ func SetupWithGenesisAccountsAndValSet(b testing.TB, db dbm.DB, genAccs []authty
 
 	genesisState[authtypes.ModuleName] = appCodec.MustMarshalJSON(authGenesis)
 
-	validator := tmtypes.NewValidator(pubKey, 1)
-	valSet := tmtypes.NewValidatorSet([]*tmtypes.Validator{validator})
+	validator := cmtypes.NewValidator(pubKey, 1)
+	valSet := cmtypes.NewValidatorSet([]*cmtypes.Validator{validator})
 
 	validators := make([]stakingtypes.Validator, 0, len(valSet.Validators))
 	delegations := make([]stakingtypes.Delegation, 0, len(valSet.Validators))
@@ -65,7 +69,7 @@ func SetupWithGenesisAccountsAndValSet(b testing.TB, db dbm.DB, genAccs []authty
 	bondAmt := sdk.DefaultPowerReduction
 
 	for _, val := range valSet.Validators {
-		pk, _ := cryptocodec.FromTmPubKeyInterface(val.PubKey)
+		pk, _ := cryptocodec.FromCmtPubKeyInterface(val.PubKey)
 		pkAny, _ := codectypes.NewAnyWithValue(pk)
 		validator := stakingtypes.Validator{
 			OperatorAddress:   sdk.ValAddress(val.Address).String(),
@@ -73,17 +77,17 @@ func SetupWithGenesisAccountsAndValSet(b testing.TB, db dbm.DB, genAccs []authty
 			Jailed:            false,
 			Status:            stakingtypes.Bonded,
 			Tokens:            bondAmt,
-			DelegatorShares:   sdk.OneDec(),
+			DelegatorShares:   sdkmath.LegacyOneDec(),
 			Description:       stakingtypes.Description{},
 			UnbondingHeight:   int64(0),
 			UnbondingTime:     time.Unix(0, 0).UTC(),
-			Commission:        stakingtypes.NewCommission(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec()),
-			MinSelfDelegation: sdk.ZeroInt(),
+			Commission:        stakingtypes.NewCommission(sdkmath.LegacyZeroDec(), sdkmath.LegacyZeroDec(), sdkmath.LegacyZeroDec()),
+			MinSelfDelegation: sdkmath.ZeroInt(),
 		}
 		validators = append(validators, validator)
-		delegations = append(delegations, stakingtypes.NewDelegation(genAccs[0].GetAddress(), val.Address.Bytes(), sdk.OneDec()))
-
+		delegations = append(delegations, stakingtypes.NewDelegation(genAccs[0].GetAddress().String(), sdk.ValAddress(val.Address).String(), sdkmath.LegacyOneDec()))
 	}
+
 	// set validators and delegations
 	stakingGenesis := stakingtypes.NewGenesisState(stakingtypes.DefaultParams(), validators, delegations)
 	genesisState[stakingtypes.ModuleName] = appCodec.MustMarshalJSON(stakingGenesis)
@@ -111,16 +115,16 @@ func SetupWithGenesisAccountsAndValSet(b testing.TB, db dbm.DB, genAccs []authty
 	consensusParams := simtestutil.DefaultConsensusParams
 	consensusParams.Block.MaxGas = 100 * simtestutil.DefaultGenTxGas
 
-	wasmApp.InitChain(
-		abci.RequestInitChain{
+	_, err = wasmApp.InitChain(
+		&abci.RequestInitChain{
 			Validators:      []abci.ValidatorUpdate{},
 			ConsensusParams: consensusParams,
 			AppStateBytes:   stateBytes,
 		},
 	)
-
-	wasmApp.Commit()
-	wasmApp.BeginBlock(abci.RequestBeginBlock{Header: tmproto.Header{Height: wasmApp.LastBlockHeight() + 1}})
+	require.NoError(b, err)
+	_, err = wasmApp.FinalizeBlock(&abci.RequestFinalizeBlock{Height: wasmApp.LastBlockHeight() + 1})
+	require.NoError(b, err)
 
 	return wasmApp
 }
@@ -168,9 +172,10 @@ func InitializeWasmApp(b testing.TB, db dbm.DB, numAccounts int) AppInfo {
 	wasmApp := SetupWithGenesisAccountsAndValSet(b, db, genAccs, bals...)
 
 	// add wasm contract
-	height := int64(2)
+	height := int64(1)
 	txGen := moduletestutil.MakeTestEncodingConfig().TxConfig
-	wasmApp.BeginBlock(abci.RequestBeginBlock{Header: tmproto.Header{Height: height, Time: time.Now()}})
+	_, err := wasmApp.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: time.Now()})
+	require.NoError(b, err)
 
 	// upload the code
 	cw20Code, err := os.ReadFile("./testdata/cw20_base.wasm")
@@ -223,9 +228,10 @@ func InitializeWasmApp(b testing.TB, db dbm.DB, numAccounts int) AppInfo {
 	evt := res.Events[len(res.Events)-1]
 	attr := evt.Attributes[0]
 	contractAddr := attr.Value
-
-	wasmApp.EndBlock(abci.RequestEndBlock{Height: height})
-	wasmApp.Commit()
+	_, err = wasmApp.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height})
+	require.NoError(b, err)
+	_, err = wasmApp.Commit()
+	require.NoError(b, err)
 
 	return AppInfo{
 		App:          wasmApp,
