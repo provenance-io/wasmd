@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+
 	channeltypesv2 "github.com/cosmos/ibc-go/v10/modules/core/04-channel/v2/types"
 
 	errorsmod "cosmossdk.io/errors"
@@ -103,8 +104,20 @@ func (h SDKMessageHandler) handleSdkMessage(ctx sdk.Context, contractAddr sdk.Ad
 	if err != nil {
 		return nil, err
 	}
-	if len(signers) == 0 || !sdk.AccAddress(signers[0]).Equals(contractAddr) {
-		return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "contract doesn't have permission")
+	if IsMultisigOKMsg(msg) {
+		// Some msgs are allowed to have multiple signers as long as the first is the contract.
+		// The endpoints for these msgs do their own identification of the first signer as a
+		// smart contract, and the other signers as having authorized the smart contract to do stuff.
+		if len(signers) == 0 || !sdk.AccAddress(signers[0]).Equals(contractAddr) {
+			return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "contract doesn't have permission")
+		}
+	} else {
+		// Standard x/wasm behavior requires that all signers are the smart contract.
+		for _, acct := range signers {
+			if !contractAddr.Equals(sdk.AccAddress(acct)) {
+				return nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "contract doesn't have permission")
+			}
+		}
 	}
 	// --- end block
 
@@ -120,6 +133,47 @@ func (h SDKMessageHandler) handleSdkMessage(ctx sdk.Context, contractAddr sdk.Ad
 	// path should never be called, because all those Msgs should be
 	// registered within the `msgServiceRouter` already.
 	return nil, errorsmod.Wrapf(sdkerrors.ErrUnknownRequest, "can't route message %+v", msg)
+}
+
+// ProvMultisigOkMsgs contains a list of all the MsgTypeURLs that properly
+// validate the signers when the first signer is the smart contract.
+// At the time of writing, only the x/metadata module does this, but not for
+// all endpoints. I've left the single-signer and inactive Msg types in here
+// (commented out) to represent that they weren't simply forgotten in the list.
+var ProvMultisigOkMsgs = map[string]bool{
+	"/provenance.metadata.v1.MsgAddContractSpecToScopeSpecRequest": true,
+	"/provenance.metadata.v1.MsgAddNetAssetValuesRequest":          true,
+	"/provenance.metadata.v1.MsgAddScopeDataAccessRequest":         true,
+	"/provenance.metadata.v1.MsgAddScopeOwnerRequest":              true,
+	// "/provenance.metadata.v1.MsgBindOSLocatorRequest": false,
+	"/provenance.metadata.v1.MsgDeleteContractSpecFromScopeSpecRequest": true,
+	"/provenance.metadata.v1.MsgDeleteContractSpecificationRequest":     true,
+	// "/provenance.metadata.v1.MsgDeleteOSLocatorRequest": false,
+	"/provenance.metadata.v1.MsgDeleteRecordRequest":              true,
+	"/provenance.metadata.v1.MsgDeleteRecordSpecificationRequest": true,
+	"/provenance.metadata.v1.MsgDeleteScopeDataAccessRequest":     true,
+	"/provenance.metadata.v1.MsgDeleteScopeOwnerRequest":          true,
+	"/provenance.metadata.v1.MsgDeleteScopeRequest":               true,
+	"/provenance.metadata.v1.MsgDeleteScopeSpecificationRequest":  true,
+	"/provenance.metadata.v1.MsgMigrateValueOwnerRequest":         true,
+	// "/provenance.metadata.v1.MsgModifyOSLocatorRequest": false,
+	// "/provenance.metadata.v1.MsgP8eMemorializeContractRequest": false,
+	"/provenance.metadata.v1.MsgSetAccountDataRequest":             true,
+	"/provenance.metadata.v1.MsgUpdateValueOwnersRequest":          true,
+	"/provenance.metadata.v1.MsgWriteContractSpecificationRequest": true,
+	// "/provenance.metadata.v1.MsgWriteP8eContractSpecRequest": false,
+	"/provenance.metadata.v1.MsgWriteRecordRequest":              true,
+	"/provenance.metadata.v1.MsgWriteRecordSpecificationRequest": true,
+	"/provenance.metadata.v1.MsgWriteScopeRequest":               true,
+	"/provenance.metadata.v1.MsgWriteScopeSpecificationRequest":  true,
+	"/provenance.metadata.v1.MsgWriteSessionRequest":             true,
+}
+
+// IsMultisigOKMsg returns true if the provide msg allows multiple signatures
+// where the first is the smart contract and the rest are others. Most messages
+// are not like this. Most messages require all signers to be the smart contract.
+func IsMultisigOKMsg(msg sdk.Msg) bool {
+	return ProvMultisigOkMsgs[sdk.MsgTypeURL(msg)]
 }
 
 // MessageHandlerChain defines a chain of handlers that are called one by one until it can be handled.
