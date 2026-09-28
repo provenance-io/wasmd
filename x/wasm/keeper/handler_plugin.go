@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
-
 	channeltypesv2 "github.com/cosmos/ibc-go/v10/modules/core/04-channel/v2/types"
 
 	errorsmod "cosmossdk.io/errors"
