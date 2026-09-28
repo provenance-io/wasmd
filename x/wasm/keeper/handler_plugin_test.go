@@ -125,6 +125,7 @@ func TestSDKMessageHandlerDispatch(t *testing.T) {
 	})
 	myContractAddr := RandomAccountAddress(t)
 	myContractMessage := wasmvmtypes.CosmosMsg{Custom: []byte("{}")}
+	ProvMultisigOkMsgs[sdk.MsgTypeURL(&MockMessage{})] = true
 
 	specs := map[string]struct {
 		srcRoute         MessageRouter
