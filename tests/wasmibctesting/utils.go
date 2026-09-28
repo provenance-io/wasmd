@@ -17,12 +17,12 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/gogoproto/proto"
-	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
-	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
-	channeltypesv2 "github.com/cosmos/ibc-go/v10/modules/core/04-channel/v2/types"
-	host "github.com/cosmos/ibc-go/v10/modules/core/24-host"
-	hostv2 "github.com/cosmos/ibc-go/v10/modules/core/24-host/v2"
-	ibctesting "github.com/cosmos/ibc-go/v10/testing"
+	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
+	channeltypes "github.com/cosmos/ibc-go/v11/modules/core/04-channel/types"
+	channeltypesv2 "github.com/cosmos/ibc-go/v11/modules/core/04-channel/v2/types"
+	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
+	hostv2 "github.com/cosmos/ibc-go/v11/modules/core/24-host/v2"
+	ibctesting "github.com/cosmos/ibc-go/v11/testing"
 	"github.com/stretchr/testify/require"
 
 	"cosmossdk.io/math"
@@ -295,6 +295,47 @@ func RelayPacketWithoutAck(path *ibctesting.Path, packet channeltypes.Packet, ds
 	}
 
 	return nil
+}
+
+// MsgSendPacketV2 sends an IBC2 packet signed by the contract derived from SourcePort.
+func MsgSendPacketV2(chain *WasmTestChain, endpoint *ibctesting.Endpoint, timeoutTimestamp uint64, payload channeltypesv2.Payload) (channeltypesv2.Packet, error) {
+	contractAddr, err := wasmkeeper.ContractFromPortID2(payload.SourcePort)
+	if err != nil {
+		return channeltypesv2.Packet{}, err
+	}
+
+	msgSendPacket := channeltypesv2.NewMsgSendPacket(endpoint.ClientID, timeoutTimestamp, contractAddr.String(), payload)
+
+	handler := chain.GetWasmApp().MsgServiceRouter().Handler(msgSendPacket)
+	if handler == nil {
+		return channeltypesv2.Packet{}, fmt.Errorf("no handler for MsgSendPacket")
+	}
+
+	resp, err := handler(chain.GetContext(), msgSendPacket)
+	if err != nil {
+		return channeltypesv2.Packet{}, err
+	}
+
+	// Capture IBC events so the relay helpers can find pending packets.
+	txResult := &abci.ExecTxResult{Events: resp.Events}
+	chain.CaptureIBCEventsV2(txResult)
+	chain.CaptureIBCEvents(txResult)
+
+	// Advance the block to commit state.
+	chain.Coordinator.UpdateTimeForChain(chain.TestChain)
+	chain.NextBlock()
+	chain.Coordinator.IncrementTime()
+	if err := endpoint.Counterparty.UpdateClient(); err != nil {
+		return channeltypesv2.Packet{}, err
+	}
+
+	// Parse response to build the packet.
+	var sendResponse channeltypesv2.MsgSendPacketResponse
+	if err := proto.Unmarshal(resp.Data, &sendResponse); err != nil {
+		return channeltypesv2.Packet{}, fmt.Errorf("failed to unmarshal send response: %w", err)
+	}
+
+	return channeltypesv2.NewPacket(sendResponse.Sequence, endpoint.ClientID, endpoint.Counterparty.ClientID, timeoutTimestamp, payload), nil
 }
 
 func MsgRecvPacketWithResultV2(endpoint *ibctesting.Endpoint, packet channeltypesv2.Packet) (*abci.ExecTxResult, error) {

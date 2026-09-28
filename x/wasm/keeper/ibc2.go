@@ -4,8 +4,9 @@ import (
 	"time"
 
 	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
-	channeltypesv2 "github.com/cosmos/ibc-go/v10/modules/core/04-channel/v2/types"
-	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
+	channeltypesv2 "github.com/cosmos/ibc-go/v11/modules/core/04-channel/v2/types"
+	ibcapi "github.com/cosmos/ibc-go/v11/modules/core/api"
+	ibcerrors "github.com/cosmos/ibc-go/v11/modules/core/errors"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -40,6 +41,12 @@ func (module IBC2Handler) OnSendPacket(
 		panic(errorsmod.Wrapf(err, "Invalid contract port id"))
 	}
 
+	// According to the IBC2 spec, contracts are expected to verify the signer.
+	// As an extra check, we enforce that the signer matches the contract to prevent port spoofing.
+	if !signer.Equals(contractAddr) {
+		return errorsmod.Wrapf(ibcerrors.ErrUnauthorized, "signer %s is different from contract %s", signer, contractAddr)
+	}
+
 	msg := wasmvmtypes.IBC2PacketSendMsg{
 		Payload:           newIBC2Payload(payload),
 		SourceClient:      sourceClient,
@@ -69,7 +76,13 @@ func (module IBC2Handler) OnRecvPacket(
 	}
 
 	em := sdk.NewEventManager()
-	msg := wasmvmtypes.IBC2PacketReceiveMsg{Payload: newIBC2Payload(payload), Relayer: relayer.String(), SourceClient: sourceClient, PacketSequence: sequence}
+	msg := wasmvmtypes.IBC2PacketReceiveMsg{
+		Payload:           newIBC2Payload(payload),
+		Relayer:           relayer.String(),
+		SourceClient:      sourceClient,
+		DestinationClient: destinationClient,
+		PacketSequence:    sequence,
+	}
 
 	ack := module.keeper.OnRecvIBC2Packet(ctx.WithEventManager(em), contractAddr, msg)
 
@@ -140,7 +153,7 @@ func (k Keeper) OnAckIBC2Packet(
 	contractAddr sdk.AccAddress,
 	msg wasmvmtypes.IBC2AcknowledgeMsg,
 ) error {
-	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-ack-packet")
+	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-ack-packet") // nolint:staticcheck // TODO update to OTEL
 
 	contractInfo, codeInfo, prefixStore, err := k.contractInstance(ctx, contractAddr)
 	if err != nil {
@@ -175,7 +188,7 @@ func (k Keeper) OnRecvIBC2Packet(
 	contractAddr sdk.AccAddress,
 	msg wasmvmtypes.IBC2PacketReceiveMsg,
 ) channeltypesv2.RecvPacketResult {
-	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-recv-packet")
+	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-recv-packet") // nolint:staticcheck // TODO update to OTEL
 	contractInfo, codeInfo, prefixStore, err := k.contractInstance(ctx, contractAddr)
 	if err != nil {
 		return channeltypesv2.RecvPacketResult{
@@ -211,6 +224,13 @@ func (k Keeper) OnRecvIBC2Packet(
 		}
 	}
 
+	if res.Ok == nil {
+		return channeltypesv2.RecvPacketResult{
+			Status:          channeltypesv2.PacketStatus_Failure,
+			Acknowledgement: []byte(errorsmod.Wrap(types.ErrVMError, "internal wasmvm error: nil ok response").Error()),
+		}
+	}
+
 	// note submessage reply results can overwrite the `Acknowledgement` data
 	data, err := k.handleContractResponse(ctx, contractAddr, contractInfo.IBC2PortID, res.Ok.Messages, res.Ok.Attributes, res.Ok.Acknowledgement, res.Ok.Events)
 	if err != nil {
@@ -242,7 +262,7 @@ func (k Keeper) OnTimeoutIBC2Packet(
 	contractAddr sdk.AccAddress,
 	msg wasmvmtypes.IBC2PacketTimeoutMsg,
 ) error {
-	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-timeout-packet")
+	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-timeout-packet") // nolint:staticcheck // TODO update to OTEL
 
 	contractInfo, codeInfo, prefixStore, err := k.contractInstance(ctx, contractAddr)
 	if err != nil {
@@ -277,7 +297,7 @@ func (k Keeper) OnSendIBC2Packet(
 	contractAddr sdk.AccAddress,
 	msg wasmvmtypes.IBC2PacketSendMsg,
 ) error {
-	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-send-packet")
+	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-send-packet") // nolint:staticcheck // TODO update to OTEL
 
 	contractInfo, codeInfo, prefixStore, err := k.contractInstance(ctx, contractAddr)
 	if err != nil {
@@ -301,7 +321,7 @@ func (k Keeper) OnSendIBC2Packet(
 		return types.MarkErrorDeterministic(errorsmod.Wrap(types.ErrExecuteFailed, res.Err))
 	}
 
-	return k.handleIBCBasicContractResponse(ctx, contractAddr, contractInfo.IBCPortID, res.Ok)
+	return k.handleIBCBasicContractResponse(ctx, contractAddr, contractInfo.IBC2PortID, res.Ok)
 }
 
 func newIBC2Payload(payload channeltypesv2.Payload) wasmvmtypes.IBC2Payload {
